@@ -22,9 +22,14 @@ const badgeVariants = cva(
   }
 )
 
-const Badge = React.forwardRef(({ className, variant, ...props }, ref) => {
+/** @typedef {{className?: string, variant?: "default" | "secondary" | "destructive" | "outline", children?: React.ReactNode} & React.HTMLAttributes<HTMLDivElement>} BadgeProps */
+
+/** @type {React.ForwardRefExoticComponent<BadgeProps>} */
+const Badge = React.forwardRef(({ className, variant, children, ...props }, ref) => {
   return (
-    <div ref={ref} className={cn(badgeVariants({ variant }), className)} {...props} />
+    <div ref={ref} className={cn(badgeVariants({ variant }), className)} {...props}>
+      {children}
+    </div>
   );
 });
 

@@ -1,13 +1,16 @@
-import { createClient } from '@base44/sdk';
-import { appParams } from '@/lib/app-params';
+// Base44 client has been removed in favor of Supabase.
+// This file is kept as a stub to avoid breaking any accidental imports.
+// Please migrate any remaining Base44 usages to the Supabase client in src/lib/supabaseClient.js.
 
-const { appId, serverUrl, token, functionsVersion } = appParams;
-
-//Create a client with authentication required
-export const base44 = createClient({
-  appId,
-  serverUrl,
-  token,
-  functionsVersion,
-  requiresAuth: false
-});
+export const base44 = {
+    auth: {},
+    entities: {
+        Query: {}
+    },
+    integrations: {
+        Core: {}
+    },
+    functions: {
+        invoke: async () => ({ data: null })
+    }
+};

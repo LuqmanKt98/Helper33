@@ -31,15 +31,28 @@ const buttonVariants = cva(
   }
 )
 
-const Button = React.forwardRef(({ 
-  className, 
-  variant, 
-  size, 
-  asChild = false, 
+/**
+ * @typedef {Object} ButtonProps
+ * @property {string} [className]
+ * @property {"default" | "destructive" | "outline" | "secondary" | "ghost" | "link"} [variant]
+ * @property {"default" | "sm" | "lg" | "icon"} [size]
+ * @property {boolean} [asChild]
+ * @property {boolean} [enableSound]
+ * @property {string} [soundType]
+ * @property {React.ReactNode} [children]
+ * @property {React.ButtonHTMLAttributes<HTMLButtonElement>["onClick"]} [onClick]
+ */
+
+/** @type {React.ForwardRefExoticComponent<ButtonProps & React.ButtonHTMLAttributes<HTMLButtonElement>>} */
+const Button = React.forwardRef(({
+  className,
+  variant,
+  size,
+  asChild = false,
   enableSound = true,
   soundType = 'click',
   children,
-  ...props 
+  ...props
 }, ref) => {
   const handleClick = (e) => {
     // Play UI sound
@@ -47,7 +60,7 @@ const Button = React.forwardRef(({
       const event = new CustomEvent('playUISound', { detail: { type: soundType } });
       window.dispatchEvent(event);
     }
-    
+
     // Call original onClick
     if (props.onClick) {
       props.onClick(e);
