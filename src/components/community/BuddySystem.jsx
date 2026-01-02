@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -80,65 +81,113 @@ export default function BuddySystem() {
 
   const queryClient = useQueryClient();
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => base44.auth.me(),
+    queryKey: ['currentUser', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: myBuddies = [] } = useQuery({
-    queryKey: ['buddyConnections'],
+    queryKey: ['buddyConnections', user?.id],
     queryFn: async () => {
-      const connections = await base44.entities.BuddyConnection.list('-created_date');
-      return connections.filter(c =>
-        c.requester_email === user?.email || c.buddy_email === user?.email
-      );
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('buddy_connections')
+        .select('*')
+        .or(`requester_id.eq.${user.id},buddy_id.eq.${user.id}`)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
     },
     enabled: !!user
   });
 
   const { data: allUsers = [] } = useQuery({
     queryKey: ['potentialBuddies'],
-    queryFn: () => base44.entities.User.list(),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*');
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!user && showFindBuddy
   });
 
   const { data: myGoals = [] } = useQuery({
     queryKey: ['myGoals'],
-    queryFn: () => base44.entities.CoachingGoal.filter({ status: 'active' }),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('coaching_goals')
+        .select('*')
+        .eq('status', 'active');
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!user
   });
 
   const { data: upcomingCheckIns = [] } = useQuery({
     queryKey: ['upcomingCheckIns'],
     queryFn: async () => {
-      const checkIns = await base44.entities.BuddyCheckIn.list('-check_in_date');
-      return checkIns.filter(c => !c.both_completed);
+      const { data, error } = await supabase
+        .from('buddy_check_ins')
+        .select('*')
+        .eq('both_completed', false)
+        .order('check_in_date', { ascending: false });
+      if (error) throw error;
+      return data || [];
     },
     enabled: !!user
   });
 
   const { data: encouragements = [] } = useQuery({
     queryKey: ['encouragements'],
-    queryFn: () => base44.entities.BuddyEncouragement.filter({
-      receiver_email: user?.email,
-      is_read: false
-    }),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('buddy_encouragements')
+        .select('*')
+        .eq('receiver_email', user?.email)
+        .eq('is_read', false);
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!user
   });
 
   const { data: userCommunityProfile } = useQuery({
-    queryKey: ['communityProfile', user?.email],
+    queryKey: ['communityProfile', user?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.UserCommunityProfile.filter({
-        created_by: user.email
-      });
-      return profiles[0];
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from('profiles') // Assuming profiles table has these fields
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      if (error) return null;
+      return data;
     },
     enabled: !!user
   });
 
   const requestBuddyMutation = useMutation({
-    mutationFn: (data) => base44.entities.BuddyConnection.create(data),
+    mutationFn: async (data) => {
+      const { error } = await supabase
+        .from('buddy_connections')
+        .insert(data);
+      if (error) throw error;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['buddyConnections']);
       setShowFindBuddy(false);
@@ -148,7 +197,13 @@ export default function BuddySystem() {
   });
 
   const updateBuddyMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.BuddyConnection.update(id, data),
+    mutationFn: async ({ id, data }) => {
+      const { error } = await supabase
+        .from('buddy_connections')
+        .update(data)
+        .eq('id', id);
+      if (error) throw error;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['buddyConnections']);
       toast.success('Updated!');
@@ -168,14 +223,24 @@ export default function BuddySystem() {
         [completedField]: true
       };
 
-      const updated = await base44.entities.BuddyCheckIn.update(checkInId, updateData);
+      const { data: updated, error } = await supabase
+        .from('buddy_check_ins')
+        .update(updateData)
+        .eq('id', checkInId)
+        .select()
+        .single();
+
+      if (error) throw error;
 
       // Check if both completed
       if (updated.requester_completed && updated.buddy_completed && !updated.both_completed) {
-        await base44.entities.BuddyCheckIn.update(checkInId, {
-          both_completed: true,
-          completed_at: new Date().toISOString()
-        });
+        await supabase
+          .from('buddy_check_ins')
+          .update({
+            both_completed: true,
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', checkInId);
       }
 
       return updated;
@@ -196,7 +261,12 @@ export default function BuddySystem() {
   });
 
   const sendEncouragementMutation = useMutation({
-    mutationFn: (data) => base44.entities.BuddyEncouragement.create(data),
+    mutationFn: async (data) => {
+      const { error } = await supabase
+        .from('buddy_encouragements')
+        .insert(data);
+      if (error) throw error;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['encouragements']);
       setShowEncouragementModal(false);
@@ -293,8 +363,8 @@ export default function BuddySystem() {
     u.email !== user?.email &&
     !myBuddies.some(b => b.buddy_email === u.email || b.requester_email === u.email) &&
     (searchTerm === '' ||
-     u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     u.email?.toLowerCase().includes(searchTerm.toLowerCase()))
+      u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.email?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
@@ -649,9 +719,8 @@ export default function BuddySystem() {
 
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div className="flex items-center gap-2 text-sm">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            myCompleted ? 'bg-green-500' : 'bg-gray-300'
-                          }`}>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${myCompleted ? 'bg-green-500' : 'bg-gray-300'
+                            }`}>
                             {myCompleted ? (
                               <Check className="w-5 h-5 text-white" />
                             ) : (
@@ -661,9 +730,8 @@ export default function BuddySystem() {
                           <span className="text-gray-700">Your update</span>
                         </div>
                         <div className="flex items-center gap-2 text-sm">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            buddyCompleted ? 'bg-green-500' : 'bg-gray-300'
-                          }`}>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${buddyCompleted ? 'bg-green-500' : 'bg-gray-300'
+                            }`}>
                             {buddyCompleted ? (
                               <Check className="w-5 h-5 text-white" />
                             ) : (
@@ -842,11 +910,11 @@ export default function BuddySystem() {
                         </div>
                         <Button
                           onClick={() => {
-                            base44.entities.BuddyEncouragement.update(enc.id, {
+                            supabase.from('buddy_encouragements').update({
                               is_read: true,
                               read_at: new Date().toISOString()
-                            }).then(() => {
-                              queryClient.invalidateQueries(['encouragements']);
+                            }).eq('id', enc.id).then(() => {
+                              queryClient.invalidateQueries({ queryKey: ['encouragements'] });
                             });
                           }}
                           variant="ghost"
@@ -978,7 +1046,7 @@ export default function BuddySystem() {
               <label className="block text-sm font-medium mb-2">Progress Summary</label>
               <Textarea
                 value={checkInData.progress_summary}
-                onChange={(e) => setCheckInData({...checkInData, progress_summary: e.target.value})}
+                onChange={(e) => setCheckInData({ ...checkInData, progress_summary: e.target.value })}
                 placeholder="How has your progress been since last check-in?"
                 rows={3}
               />
@@ -988,7 +1056,7 @@ export default function BuddySystem() {
               <label className="block text-sm font-medium mb-2">Current Mood</label>
               <select
                 value={checkInData.mood}
-                onChange={(e) => setCheckInData({...checkInData, mood: e.target.value})}
+                onChange={(e) => setCheckInData({ ...checkInData, mood: e.target.value })}
                 className="w-full p-3 border rounded-lg"
               >
                 <option value="great">😊 Great - Feeling strong and motivated</option>
@@ -1007,7 +1075,7 @@ export default function BuddySystem() {
                   onChange={(e) => {
                     const newWins = [...checkInData.wins];
                     newWins[idx] = e.target.value;
-                    setCheckInData({...checkInData, wins: newWins});
+                    setCheckInData({ ...checkInData, wins: newWins });
                   }}
                   placeholder={`Win #${idx + 1}`}
                   className="mb-2"
@@ -1034,7 +1102,7 @@ export default function BuddySystem() {
                   onChange={(e) => {
                     const newChallenges = [...checkInData.challenges];
                     newChallenges[idx] = e.target.value;
-                    setCheckInData({...checkInData, challenges: newChallenges});
+                    setCheckInData({ ...checkInData, challenges: newChallenges });
                   }}
                   placeholder={`Challenge #${idx + 1}`}
                   className="mb-2"
@@ -1056,7 +1124,7 @@ export default function BuddySystem() {
               <label className="block text-sm font-medium mb-2">What do you need support with?</label>
               <Textarea
                 value={checkInData.needs_support_with}
-                onChange={(e) => setCheckInData({...checkInData, needs_support_with: e.target.value})}
+                onChange={(e) => setCheckInData({ ...checkInData, needs_support_with: e.target.value })}
                 placeholder="Share what you need help with..."
                 rows={2}
               />
@@ -1066,7 +1134,7 @@ export default function BuddySystem() {
               <label className="block text-sm font-medium mb-2">Commitment for Next Check-in</label>
               <Input
                 value={checkInData.commitment_for_next}
-                onChange={(e) => setCheckInData({...checkInData, commitment_for_next: e.target.value})}
+                onChange={(e) => setCheckInData({ ...checkInData, commitment_for_next: e.target.value })}
                 placeholder="What will you accomplish by next time?"
               />
             </div>
@@ -1124,11 +1192,10 @@ export default function BuddySystem() {
                       setSelectedTemplate(template);
                       setEncouragementMessage(template.text);
                     }}
-                    className={`p-3 rounded-lg border-2 transition-all text-left ${
-                      selectedTemplate === template
-                        ? 'border-purple-500 bg-purple-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
+                    className={`p-3 rounded-lg border-2 transition-all text-left ${selectedTemplate === template
+                      ? 'border-purple-500 bg-purple-50'
+                      : 'border-gray-200 hover:border-gray-300'
+                      }`}
                   >
                     <div className="text-2xl mb-1">{template.emoji}</div>
                     <p className="text-xs text-gray-700 line-clamp-2">{template.text}</p>
@@ -1216,11 +1283,11 @@ export default function BuddySystem() {
                             const newShared = isShared
                               ? currentShared.filter(g => g.goal_id !== goal.id)
                               : [...currentShared, {
-                                  goal_id: goal.id,
-                                  goal_title: goal.goal_title,
-                                  shared_by: user.email,
-                                  progress_visibility: 'full'
-                                }];
+                                goal_id: goal.id,
+                                goal_title: goal.goal_title,
+                                shared_by: user.email,
+                                progress_visibility: 'full'
+                              }];
 
                             updateBuddyMutation.mutate({
                               id: selectedConnection.id,

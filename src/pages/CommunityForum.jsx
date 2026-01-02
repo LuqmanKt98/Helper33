@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,9 +44,21 @@ export default function CommunityForum() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me().catch(() => null),
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   // Default categories - always available
@@ -110,8 +123,14 @@ export default function CommunityForum() {
     queryKey: ['forumCategories'],
     queryFn: async () => {
       try {
-        const result = await base44.entities.ForumCategory.list();
-        return result && result.length > 0 ? result : defaultCategories;
+        // If we have a forum_categories table, use it
+        const { data, error } = await supabase
+          .from('forum_categories')
+          .select('*')
+          .order('name');
+
+        if (error || !data || data.length === 0) return defaultCategories;
+        return data;
       } catch (error) {
         console.error('Error loading categories:', error);
         return defaultCategories;
@@ -123,13 +142,21 @@ export default function CommunityForum() {
     queryKey: ['forumPosts', selectedCategory, sortBy],
     queryFn: async () => {
       try {
-        const query = selectedCategory === 'all' 
-          ? {} 
-          : { category_id: selectedCategory };
-        
-        const sortOrder = sortBy === 'recent' ? '-last_activity_date' : '-like_count';
-        const result = await base44.entities.ForumPost.filter(query, sortOrder, 50);
-        return result || [];
+        let query = supabase.from('posts').select('*');
+
+        if (selectedCategory !== 'all') {
+          query = query.eq('category_id', selectedCategory);
+        }
+
+        if (sortBy === 'recent') {
+          query = query.order('created_at', { ascending: false });
+        } else {
+          query = query.order('like_count', { ascending: false });
+        }
+
+        const { data, error } = await query.limit(50);
+        if (error) throw error;
+        return data || [];
       } catch (error) {
         console.error('Error loading posts:', error);
         return [];
@@ -142,7 +169,7 @@ export default function CommunityForum() {
     queryKey: ['forumSuggestions', user?.id],
     queryFn: async () => {
       if (!user) return [];
-      
+
       try {
         // Generate AI suggestions based on user's current page and activity
         const suggestions = [
@@ -174,7 +201,7 @@ export default function CommunityForum() {
             <p className="text-gray-600 mb-6">
               Community forums are currently in development and only available to administrators.
             </p>
-            <Button 
+            <Button
               onClick={() => window.location.href = createPageUrl('Home')}
               className="w-full bg-gradient-to-r from-purple-600 to-pink-600"
             >
@@ -218,7 +245,7 @@ export default function CommunityForum() {
   const handleCreatePost = () => {
     if (!user) {
       toast.info('Please log in to create a post');
-      base44.auth.redirectToLogin(window.location.pathname);
+      navigate(createPageUrl('Login') + `?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
     navigate(createPageUrl('CreateForumPost'));
@@ -246,7 +273,7 @@ export default function CommunityForum() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        
+
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -277,7 +304,7 @@ export default function CommunityForum() {
                   className="pl-10"
                 />
               </div>
-              <Button 
+              <Button
                 onClick={handleCreatePost}
                 className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
               >
@@ -332,7 +359,7 @@ export default function CommunityForum() {
             {displayCategories.map((category) => {
               const IconComponent = getIconComponent(category.icon);
               const colorClass = getColorClasses(category.color);
-              
+
               return (
                 <motion.div
                   key={category.id}
@@ -342,9 +369,8 @@ export default function CommunityForum() {
                   className="cursor-pointer"
                   onClick={() => handleViewCategory(category.id)}
                 >
-                  <Card className={`h-full hover:shadow-lg transition-all ${
-                    selectedCategory === category.id ? 'ring-2 ring-purple-500' : ''
-                  }`}>
+                  <Card className={`h-full hover:shadow-lg transition-all ${selectedCategory === category.id ? 'ring-2 ring-purple-500' : ''
+                    }`}>
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colorClass} flex items-center justify-center shadow-lg`}>
@@ -419,7 +445,7 @@ export default function CommunityForum() {
                   animate={{ opacity: 1, y: 0 }}
                   whileHover={{ scale: 1.01 }}
                 >
-                  <Card 
+                  <Card
                     className="hover:shadow-lg transition-all cursor-pointer"
                     onClick={() => handleViewPost(post.id)}
                   >

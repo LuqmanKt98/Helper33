@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,9 +27,19 @@ export default function GroupChallengesView({ challenges = [] }) {
   const [selectedChallenge, setSelectedChallenge] = useState(null);
   const queryClient = useQueryClient();
 
+  const { user } = useAuth();
   const { data: myParticipations = [] } = useQuery({
-    queryKey: ['myParticipations'],
-    queryFn: () => base44.entities.ChallengeParticipant.filter({})
+    queryKey: ['myParticipations', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('challenge_participants')
+        .select('*')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user
   });
 
   // Add null safety check
@@ -192,34 +203,51 @@ function ChallengeDetailView({ challenge, onBack, myParticipation }) {
   const [showJoinForm, setShowJoinForm] = useState(false);
   const queryClient = useQueryClient();
 
+  const { user } = useAuth();
   const { data: participants = [] } = useQuery({
     queryKey: ['challengeParticipants', challenge.id],
-    queryFn: () => base44.entities.ChallengeParticipant.filter({ challenge_id: challenge.id })
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('challenge_participants')
+        .select('*')
+        .eq('challenge_id', challenge.id);
+      if (error) throw error;
+      return data || [];
+    }
   });
 
   const joinMutation = useMutation({
     mutationFn: async () => {
       const displayName = anonymousName.trim() || `Challenger${Math.floor(Math.random() * 1000)}`;
 
-      await base44.entities.ChallengeParticipant.create({
-        challenge_id: challenge.id,
-        display_name: displayName,
-        is_anonymous: true,
-        joined_date: new Date().toISOString().split('T')[0],
-        current_day: 0,
-        completed_days: [],
-        status: 'active',
-        check_ins: []
-      });
+      const { error: joinError } = await supabase
+        .from('challenge_participants')
+        .insert({
+          user_id: user.id,
+          challenge_id: challenge.id,
+          display_name: displayName,
+          is_anonymous: true,
+          status: 'active',
+          current_day: 0,
+          completed_days: [],
+          check_ins: []
+        });
 
-      await base44.entities.GroupChallenge.update(challenge.id, {
-        participant_count: (challenge.participant_count || 0) + 1
-      });
+      if (joinError) throw joinError;
+
+      const { error: updateError } = await supabase
+        .from('challenges')
+        .update({
+          participant_count: (challenge.participant_count || 0) + 1
+        })
+        .eq('id', challenge.id);
+
+      if (updateError) throw updateError;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['myParticipations']);
-      queryClient.invalidateQueries(['challengeParticipants']);
-      queryClient.invalidateQueries(['activeChallenges']);
+      queryClient.invalidateQueries({ queryKey: ['myParticipations'] });
+      queryClient.invalidateQueries({ queryKey: ['challengeParticipants', challenge.id] });
+      queryClient.invalidateQueries({ queryKey: ['activeChallenges'] });
       toast.success('Welcome to the challenge! 🎉');
       setShowJoinForm(false);
     }
@@ -237,23 +265,31 @@ function ChallengeDetailView({ challenge, onBack, myParticipation }) {
       const completedDays = [...(myParticipation.completed_days || []), day];
       const completion = (completedDays.length / challenge.duration_days) * 100;
 
-      await base44.entities.ChallengeParticipant.update(myParticipation.id, {
-        current_day: day,
-        completed_days: completedDays,
-        completion_percentage: completion,
-        check_ins: updatedCheckIns,
-        status: completion === 100 ? 'completed' : 'active'
-      });
+      const { error: updatePartError } = await supabase
+        .from('challenge_participants')
+        .update({
+          current_day: day,
+          completed_days: completedDays,
+          completion_percentage: completion,
+          check_ins: updatedCheckIns,
+          status: completion === 100 ? 'completed' : 'active'
+        })
+        .eq('id', myParticipation.id);
+
+      if (updatePartError) throw updatePartError;
 
       if (completion === 100) {
-        await base44.entities.GroupChallenge.update(challenge.id, {
-          completion_count: (challenge.completion_count || 0) + 1
-        });
+        await supabase
+          .from('challenges')
+          .update({
+            completion_count: (challenge.completion_count || 0) + 1
+          })
+          .eq('id', challenge.id);
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['myParticipations']);
-      queryClient.invalidateQueries(['challengeParticipants']);
+      queryClient.invalidateQueries({ queryKey: ['myParticipations'] });
+      queryClient.invalidateQueries({ queryKey: ['challengeParticipants', challenge.id] });
       toast.success('Day checked in! 🌟');
     }
   });
@@ -511,7 +547,7 @@ function DailyCheckInSection({ challenge, myParticipation, onCheckIn }) {
 
 function ParticipantsFeed({ participants, challenge }) {
   const recentCheckIns = participants
-    .flatMap(p => 
+    .flatMap(p =>
       (p.check_ins || []).map(checkIn => ({
         ...checkIn,
         participant: p.display_name
@@ -557,10 +593,10 @@ function ParticipantsFeed({ participants, challenge }) {
 
 function calculateStreak(completedDays) {
   if (!completedDays || completedDays.length === 0) return 0;
-  
+
   const sorted = [...completedDays].sort((a, b) => b - a);
   let streak = 1;
-  
+
   for (let i = 0; i < sorted.length - 1; i++) {
     if (sorted[i] - sorted[i + 1] === 1) {
       streak++;
@@ -568,6 +604,6 @@ function calculateStreak(completedDays) {
       break;
     }
   }
-  
+
   return streak;
 }

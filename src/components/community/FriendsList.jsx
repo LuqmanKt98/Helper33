@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { motion } from 'framer-motion';
-import { 
-  Users, UserPlus, Search, MessageSquare, UserCheck, 
+import {
+  Users, UserPlus, Search, MessageSquare, UserCheck,
   UserMinus, X, Check, Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -22,8 +22,8 @@ const FriendCard = ({ friend, onMessage, onRemove, type = 'friend' }) => (
   >
     <div className="flex items-center gap-3">
       {friend.requester_avatar || friend.receiver_avatar || friend.buddy_avatar ? (
-        <img 
-          src={friend.requester_avatar || friend.receiver_avatar || friend.buddy_avatar} 
+        <img
+          src={friend.requester_avatar || friend.receiver_avatar || friend.buddy_avatar}
           alt={friend.requester_name || friend.receiver_name || friend.buddy_name}
           className="w-12 h-12 rounded-full object-cover"
         />
@@ -32,7 +32,7 @@ const FriendCard = ({ friend, onMessage, onRemove, type = 'friend' }) => (
           {(friend.requester_name || friend.receiver_name || friend.buddy_name)?.[0]}
         </div>
       )}
-      
+
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-gray-900 truncate">
           {friend.requester_name || friend.receiver_name || friend.buddy_name}
@@ -82,44 +82,81 @@ export default function FriendsList({ showHeader = true }) {
 
   const { data: user } = useQuery({
     queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me()
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      return profile;
+    }
   });
 
   const { data: friendRequests = [] } = useQuery({
-    queryKey: ['friendRequests', user?.email],
+    queryKey: ['friendRequests', user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const sent = await base44.entities.FriendRequest.filter({
-        requester_email: user.email,
-        status: 'accepted'
+      const { data, error } = await supabase
+        .from('friend_requests')
+        .select(`
+          *,
+          requester:requester_id (id, full_name, avatar_url),
+          receiver:receiver_id (id, full_name, avatar_url)
+        `)
+        .eq('status', 'accepted')
+        .or(`requester_id.eq.${user.id},receiver_id.eq.${user.id}`);
+
+      if (error) throw error;
+
+      return data.map(r => {
+        const isRequester = r.requester_id === user.id;
+        const other = isRequester ? r.receiver : r.requester;
+        return {
+          ...r,
+          buddy_name: other?.full_name || 'User',
+          buddy_avatar: other?.avatar_url
+        };
       });
-      const received = await base44.entities.FriendRequest.filter({
-        receiver_email: user.email,
-        status: 'accepted'
-      });
-      return [...sent, ...received];
     },
     enabled: !!user
   });
 
   const { data: pendingRequests = [] } = useQuery({
-    queryKey: ['pendingRequests', user?.email],
+    queryKey: ['pendingRequests', user?.id],
     queryFn: async () => {
       if (!user) return [];
-      return await base44.entities.FriendRequest.filter({
-        receiver_email: user.email,
-        status: 'pending'
-      });
+      const { data, error } = await supabase
+        .from('friend_requests')
+        .select(`
+          *,
+          requester:requester_id (id, full_name, avatar_url)
+        `)
+        .eq('receiver_id', user.id)
+        .eq('status', 'pending');
+
+      if (error) throw error;
+
+      return data.map(r => ({
+        ...r,
+        requester_name: r.requester?.full_name || 'User',
+        requester_avatar: r.requester?.avatar_url
+      }));
     },
     enabled: !!user
   });
 
   const acceptRequestMutation = useMutation({
     mutationFn: async (requestId) => {
-      await base44.entities.FriendRequest.update(requestId, {
-        status: 'accepted',
-        accepted_at: new Date().toISOString()
-      });
+      const { error } = await supabase
+        .from('friend_requests')
+        .update({
+          status: 'accepted',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', requestId);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['friendRequests'] });
@@ -130,9 +167,14 @@ export default function FriendsList({ showHeader = true }) {
 
   const rejectRequestMutation = useMutation({
     mutationFn: async (requestId) => {
-      await base44.entities.FriendRequest.update(requestId, {
-        status: 'rejected'
-      });
+      const { error } = await supabase
+        .from('friend_requests')
+        .update({
+          status: 'rejected',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', requestId);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pendingRequests'] });
@@ -142,7 +184,11 @@ export default function FriendsList({ showHeader = true }) {
 
   const removeFriendMutation = useMutation({
     mutationFn: async (friend) => {
-      await base44.entities.FriendRequest.delete(friend.id);
+      const { error } = await supabase
+        .from('friend_requests')
+        .delete()
+        .eq('id', friend.id);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['friendRequests'] });

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,17 +34,36 @@ export default function WomensHealthCoach() {
   const [isInitializing, setIsInitializing] = useState(true);
   const messagesEndRef = useRef(null);
 
+  const { user: authUser } = useAuth();
+  const queryClient = useQueryClient();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: pregnancyData } = useQuery({
-    queryKey: ['pregnancy-tracking'],
+    queryKey: ['pregnancy-tracking', authUser?.id],
     queryFn: async () => {
-      const data = await base44.entities.PregnancyTracking.list();
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('pregnancy_tracking')
+        .select('*')
+        .eq('user_id', authUser.id);
+      if (error) throw error;
       return data[0] || null;
-    }
+    },
+    enabled: !!authUser
   });
 
   // Initialize conversation
@@ -51,17 +71,48 @@ export default function WomensHealthCoach() {
     const initConversation = async () => {
       try {
         setIsInitializing(true);
-        const conv = await base44.agents.createConversation({
-          agent_name: 'womens_health_coach',
-          metadata: {
-            name: 'My Women\'s Health Journey',
-            description: 'Personalized health coaching and support'
+        if (!authUser) return;
+
+        // Check for existing active conversation
+        const { data: existingConv } = await supabase
+          .from('companion_conversations')
+          .select('*')
+          .eq('user_id', authUser.id)
+          .eq('conversation_type', 'womens_health_coach')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (existingConv) {
+          setConversationId(existingConv.id);
+          // Fetch existing messages
+          const { data: existingMessages } = await supabase
+            .from('companion_messages')
+            .select('*')
+            .eq('conversation_id', existingConv.id)
+            .order('created_at', { ascending: true });
+
+          if (existingMessages) {
+            setMessages(existingMessages);
           }
-        });
-        setConversationId(conv.id);
+        } else {
+          // Create new conversation
+          const { data: newConv, error } = await supabase
+            .from('companion_conversations')
+            .insert({
+              user_id: authUser.id,
+              conversation_type: 'womens_health_coach',
+              conversation_summary: 'New Women\'s Health Journey'
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+          setConversationId(newConv.id);
+        }
       } catch (error) {
-        console.error('Error creating conversation:', error);
-        toast.error('Failed to start conversation. Please refresh the page.');
+        console.error('Error initializing conversation:', error);
+        toast.error('Failed to start conversation.');
       } finally {
         setIsInitializing(false);
       }
@@ -76,27 +127,24 @@ export default function WomensHealthCoach() {
   useEffect(() => {
     if (!conversationId) return;
 
-    try {
-      const unsubscribe = base44.agents.subscribeToConversation(conversationId, (data) => {
-        if (data && data.messages) {
-          setMessages(data.messages);
-          
-          const lastMessage = data.messages[data.messages.length - 1];
-          if (lastMessage?.role === 'assistant' && lastMessage?.status !== 'in_progress') {
-            setIsLoading(false);
-          }
+    const channel = supabase
+      .channel(`companion_messages:${conversationId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'companion_messages',
+        filter: `conversation_id=eq.${conversationId}`
+      }, (payload) => {
+        setMessages(current => [...current, payload.new]);
+        if (payload.new.role === 'assistant') {
+          setIsLoading(false);
         }
-      });
+      })
+      .subscribe();
 
-      return () => {
-        if (typeof unsubscribe === 'function') {
-          unsubscribe();
-        }
-      };
-    } catch (error) {
-      console.error('Error subscribing to conversation:', error);
-      setIsLoading(false);
-    }
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [conversationId]);
 
   // Auto-scroll to bottom
@@ -112,17 +160,33 @@ export default function WomensHealthCoach() {
     setShowQuickActions(false);
 
     try {
-      const conversation = await base44.agents.getConversation(conversationId);
-      
-      await base44.agents.addMessage(conversation, {
-        role: 'user',
-        content: text
+      // 1. Save user message to database
+      const { data: userMsg, error: userError } = await supabase
+        .from('companion_messages')
+        .insert({
+          conversation_id: conversationId,
+          role: 'user',
+          content: text
+        })
+        .select()
+        .single();
+
+      if (userError) throw userError;
+      setMessages(current => [...current, userMsg]);
+
+      // 2. Call edge function to get AI response
+      // This mimics the agentic behavior
+      const { data, error: aiError } = await supabase.functions.invoke('womens-health-coach', {
+        body: { conversationId, message: text }
       });
+
+      if (aiError) throw aiError;
+
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Failed to send message');
       setIsLoading(false);
-      setInput(text); // Restore input on error
+      setInput(text);
     }
   };
 
@@ -131,7 +195,7 @@ export default function WomensHealthCoach() {
       icon: Baby,
       title: 'This Week\'s Guide',
       description: 'Get personalized tips for my pregnancy week',
-      prompt: pregnancyData?.current_week 
+      prompt: pregnancyData?.current_week
         ? `I'm in week ${pregnancyData.current_week} of pregnancy. Can you give me a personalized guide for this week including what's happening with my baby, nutrition tips, and what I should focus on?`
         : 'Can you help me understand what I should track for my women\'s health journey?',
       color: 'from-blue-500 to-cyan-500'
@@ -143,8 +207,8 @@ export default function WomensHealthCoach() {
       prompt: pregnancyData?.pregnancy_status === 'pregnant'
         ? `Can you create a 3-day meal plan for week ${pregnancyData.current_week} of pregnancy? Please include foods that help with common symptoms and support baby's development.`
         : pregnancyData?.pregnancy_status === 'postpartum'
-        ? `Can you create a 3-day postpartum meal plan for me? I'm ${pregnancyData.postpartum_weeks} weeks postpartum. Please focus on recovery, energy, and breastfeeding nutrition if applicable.`
-        : 'Can you create a healthy meal plan for me based on my health profile and goals?',
+          ? `Can you create a 3-day postpartum meal plan for me? I'm ${pregnancyData.postpartum_weeks} weeks postpartum. Please focus on recovery, energy, and breastfeeding nutrition if applicable.`
+          : 'Can you create a healthy meal plan for me based on my health profile and goals?',
       color: 'from-green-500 to-emerald-500'
     },
     {
@@ -154,8 +218,8 @@ export default function WomensHealthCoach() {
       prompt: pregnancyData?.pregnancy_status === 'pregnant'
         ? `Can you guide me through a meditation for pregnancy? I'm in trimester ${pregnancyData.current_trimester}. Help me relax and connect with my baby.`
         : pregnancyData?.pregnancy_status === 'postpartum'
-        ? 'Can you guide me through a meditation for postpartum relaxation and bonding with my baby?'
-        : 'Can you guide me through a calming meditation for stress relief and emotional wellness?',
+          ? 'Can you guide me through a meditation for postpartum relaxation and bonding with my baby?'
+          : 'Can you guide me through a calming meditation for stress relief and emotional wellness?',
       color: 'from-purple-500 to-pink-500'
     },
     {
@@ -267,7 +331,7 @@ export default function WomensHealthCoach() {
                 <p className="text-white/90 text-sm sm:text-base">{greeting.subtitle}</p>
               </div>
             </div>
-            
+
             {/* WhatsApp Integration */}
             <a
               href={base44.agents.getWhatsAppConnectURL('womens_health_coach')}
@@ -279,7 +343,7 @@ export default function WomensHealthCoach() {
                 className="bg-[#25D366] hover:bg-[#128C7E] text-white font-bold shadow-xl"
               >
                 <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/>
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
                 </svg>
                 💬 WhatsApp
               </Button>
@@ -323,7 +387,7 @@ export default function WomensHealthCoach() {
                         Hello {user?.full_name?.split(' ')[0] || 'there'}! 👋
                       </h3>
                       <p className="text-gray-600 mb-6 max-w-md mx-auto">
-                        I'm your personal Women's Health AI Coach with access to your health data. 
+                        I'm your personal Women's Health AI Coach with access to your health data.
                         I'll provide personalized guidance based on what you're tracking.
                       </p>
                       <motion.p
@@ -427,11 +491,11 @@ export default function WomensHealthCoach() {
                       </div>
                     </div>
                     <p className="text-xs text-gray-600">
-                      {pregnancyData.pregnancy_status === 'pregnant' 
+                      {pregnancyData.pregnancy_status === 'pregnant'
                         ? `✨ I have access to week ${pregnancyData.current_week} guidance, your wellness tracking, and symptom logs.`
                         : pregnancyData.pregnancy_status === 'postpartum'
-                        ? `✨ I can see your baby care logs, wellness data, and recovery progress.`
-                        : '✨ I have access to your health profile and cycle tracking data.'}
+                          ? `✨ I can see your baby care logs, wellness data, and recovery progress.`
+                          : '✨ I have access to your health profile and cycle tracking data.'}
                     </p>
                   </CardContent>
                 </Card>
@@ -460,7 +524,7 @@ export default function WomensHealthCoach() {
                     </Button>
                   </CardTitle>
                 </CardHeader>
-                
+
                 <AnimatePresence>
                   {showQuickActions && (
                     <motion.div
@@ -592,8 +656,8 @@ export default function WomensHealthCoach() {
                     <div className="text-xs text-amber-900">
                       <p className="font-semibold mb-1">⚕️ Important Medical Notice:</p>
                       <p>
-                        I provide guidance and support, but I'm not a replacement for medical care. 
-                        Always consult your healthcare provider for medical decisions, concerning symptoms, 
+                        I provide guidance and support, but I'm not a replacement for medical care.
+                        Always consult your healthcare provider for medical decisions, concerning symptoms,
                         or emergencies.
                       </p>
                       <p className="mt-2 font-semibold">

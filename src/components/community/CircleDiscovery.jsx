@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,21 +39,42 @@ export default function CircleDiscovery({ user }) {
 
   const { data: circles = [] } = useQuery({
     queryKey: ['supportCircles'],
-    queryFn: () => base44.entities.SupportCircle.filter({ is_active: true }),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('support_circles')
+        .select('*')
+        .eq('is_active', true);
+      if (error) throw error;
+      return data || [];
+    },
   });
 
   const { data: myMemberships = [] } = useQuery({
-    queryKey: ['circleMemberships'],
-    queryFn: () => base44.entities.CircleMembership.filter({
-      created_by: user?.email
-    }),
+    queryKey: ['circleMemberships', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('circle_memberships')
+        .select('*')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!user
   });
 
   const joinCircleMutation = useMutation({
-    mutationFn: (data) => base44.entities.CircleMembership.create(data),
+    mutationFn: async (data) => {
+      const { error } = await supabase
+        .from('circle_memberships')
+        .insert({
+          ...data,
+          user_id: user.id
+        });
+      if (error) throw error;
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries(['circleMemberships']);
+      queryClient.invalidateQueries({ queryKey: ['circleMemberships', user?.id] });
       setShowJoinModal(false);
       setSelectedCircle(null);
       setDisplayName('');
@@ -137,11 +158,10 @@ export default function CircleDiscovery({ user }) {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setSelectedType('all')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    selectedType === 'all'
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${selectedType === 'all'
                       ? 'bg-gray-800 text-white'
                       : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                    }`}
                 >
                   All Types
                 </button>
@@ -149,11 +169,10 @@ export default function CircleDiscovery({ user }) {
                   <button
                     key={type.value}
                     onClick={() => setSelectedType(type.value)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1 ${
-                      selectedType === type.value
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-1 ${selectedType === type.value
                         ? `bg-${type.color}-600 text-white`
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
+                      }`}
                   >
                     <span>{type.icon}</span>
                     <span>{type.label}</span>
@@ -209,9 +228,8 @@ export default function CircleDiscovery({ user }) {
                 animate={{ opacity: 1, y: 0 }}
                 whileHover={{ y: -4 }}
               >
-                <Card className={`bg-white border-2 hover:shadow-xl transition-all ${
-                  isMember ? 'border-green-300' : 'border-blue-200 hover:border-blue-400'
-                }`}>
+                <Card className={`bg-white border-2 hover:shadow-xl transition-all ${isMember ? 'border-green-300' : 'border-blue-200 hover:border-blue-400'
+                  }`}>
                   <CardHeader>
                     <div className="flex items-start gap-3 mb-3">
                       {circle.image_url ? (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { createPageUrl } from '@/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import CustomInputOTP from '@/components/ui/CustomInputOTP';
@@ -23,18 +24,16 @@ export default function JoinFamily() {
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
 
+  const { user: authUser, login } = useAuth();
+
   // Check if user is logged in
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const currentUser = await base44.auth.me();
-        setUser(currentUser);
-      } catch (error) {
-        setUser(null);
-      }
-    };
-    checkAuth();
-  }, []);
+    if (authUser) {
+      setUser(authUser);
+    } else {
+      setUser(null);
+    }
+  }, [authUser]);
 
   // Auto-fill code from URL
   useEffect(() => {
@@ -51,7 +50,7 @@ export default function JoinFamily() {
     if (failedAttempts >= MAX_ATTEMPTS) {
       setIsLocked(true);
       toast.error(`Too many failed attempts. Redirecting to home page...`);
-      
+
       // Redirect after 3 seconds
       setTimeout(() => {
         navigate(createPageUrl('Home'));
@@ -62,26 +61,26 @@ export default function JoinFamily() {
   const validateCode = async (codeToValidate) => {
     if (!codeToValidate || codeToValidate.length !== 8) return;
     if (isLocked) return;
-    
+
     setIsValidating(true);
     try {
-      const response = await base44.functions.invoke('validateFamilyInvite', { 
-        code: codeToValidate 
+      const { data, error } = await supabase.functions.invoke('validateFamilyInvite', {
+        body: { code: codeToValidate }
       });
-      
-      if (response.data?.valid) {
-        setInviteDetails(response.data);
-        toast.success(`Valid invite from ${response.data.familyOwnerName}!`);
+
+      if (data?.valid) {
+        setInviteDetails(data);
+        toast.success(`Valid invite from ${data.familyOwnerName}!`);
         setFailedAttempts(0); // Reset attempts on success
       } else {
         const newAttempts = failedAttempts + 1;
         setFailedAttempts(newAttempts);
-        
+
         const remainingAttempts = MAX_ATTEMPTS - newAttempts;
         if (remainingAttempts > 0) {
           toast.error(`Invalid invite code. ${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining.`);
         }
-        
+
         setInviteDetails(null);
         setCode(''); // Clear the code for retry
       }
@@ -89,12 +88,12 @@ export default function JoinFamily() {
       console.error('Error validating code:', error);
       const newAttempts = failedAttempts + 1;
       setFailedAttempts(newAttempts);
-      
+
       const remainingAttempts = MAX_ATTEMPTS - newAttempts;
       if (remainingAttempts > 0) {
         toast.error(`Unable to validate code. ${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining.`);
       }
-      
+
       setInviteDetails(null);
       setCode('');
     } finally {
@@ -112,11 +111,11 @@ export default function JoinFamily() {
 
   const handleJoin = async () => {
     if (isLocked) return;
-    
+
     if (!user) {
       toast.info('Please log in to join a family');
       const returnUrl = `${window.location.pathname}?code=${code}`;
-      await base44.auth.redirectToLogin(returnUrl);
+      navigate(createPageUrl('Login') + `?redirect=${encodeURIComponent(returnUrl)}`);
       return;
     }
 
@@ -127,12 +126,14 @@ export default function JoinFamily() {
 
     setIsLoading(true);
     try {
-      const response = await base44.functions.invoke('acceptFamilyInvite', { code });
-      
-      if (response.data?.success) {
+      const { data, error } = await supabase.functions.invoke('acceptFamilyInvite', {
+        body: { code }
+      });
+
+      if (data?.success) {
         setIsSuccess(true);
-        toast.success(response.data.message || 'Successfully joined family!');
-        
+        toast.success(data.message || 'Successfully joined family!');
+
         // Redirect to family hub after 2 seconds
         setTimeout(() => {
           navigate(createPageUrl('Family'));
@@ -144,12 +145,12 @@ export default function JoinFamily() {
       console.error('Error joining family:', error);
       const newAttempts = failedAttempts + 1;
       setFailedAttempts(newAttempts);
-      
+
       const remainingAttempts = MAX_ATTEMPTS - newAttempts;
       if (remainingAttempts > 0) {
         toast.error(`${error.message}. ${remainingAttempts} attempt${remainingAttempts === 1 ? '' : 's'} remaining.`);
       }
-      
+
       setCode('');
     } finally {
       setIsLoading(false);
@@ -270,16 +271,16 @@ export default function JoinFamily() {
               <label className="block text-sm font-medium text-gray-700 text-center">
                 Enter Invite Code
               </label>
-              <CustomInputOTP 
-                length={8} 
-                value={code} 
+              <CustomInputOTP
+                length={8}
+                value={code}
                 onChange={handleCodeChange}
               />
             </div>
 
             {/* Join button */}
-            <Button 
-              onClick={handleJoin} 
+            <Button
+              onClick={handleJoin}
               disabled={isLoading || isValidating || !inviteDetails || code.length < 8}
               className="w-full"
               size="lg"
@@ -308,8 +309,8 @@ export default function JoinFamily() {
         </Card>
 
         <div className="mt-6 text-center">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             onClick={() => navigate(createPageUrl('Home'))}
             className="text-gray-600 hover:text-gray-900"
           >

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,7 +33,17 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
 
   const createProfileMutation = useMutation({
     mutationFn: async () => {
-      return await base44.entities.UserCommunityProfile.create(profileData);
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({
+          ...profileData,
+          has_community_profile: true
+        })
+        .eq('id', user.id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['communityProfiles']);
@@ -44,8 +54,8 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
   });
 
   const goalOptions = [
-    'emotional_healing', 'daily_functioning', 'relationships', 
-    'work_life', 'self_care', 'grief_processing', 
+    'emotional_healing', 'daily_functioning', 'relationships',
+    'work_life', 'self_care', 'grief_processing',
     'life_transitions', 'personal_growth', 'habit_building'
   ];
 
@@ -98,7 +108,7 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
               <p className="text-purple-100 text-sm">Let's set up your profile - Step {step} of 4</p>
             </div>
           </div>
-          
+
           {/* Progress Bar */}
           <div className="mt-4 bg-white/20 rounded-full h-2 overflow-hidden">
             <motion.div
@@ -127,12 +137,11 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setProfileData({...profileData, is_fully_anonymous: true, visibility_level: 'anonymous'})}
-                  className={`p-6 rounded-xl border-2 transition-all ${
-                    profileData.is_fully_anonymous 
-                      ? 'border-blue-500 bg-blue-50 shadow-lg' 
+                  onClick={() => setProfileData({ ...profileData, is_fully_anonymous: true, visibility_level: 'anonymous' })}
+                  className={`p-6 rounded-xl border-2 transition-all ${profileData.is_fully_anonymous
+                      ? 'border-blue-500 bg-blue-50 shadow-lg'
                       : 'border-gray-200 hover:border-blue-300'
-                  }`}
+                    }`}
                 >
                   <EyeOff className="w-12 h-12 text-blue-600 mx-auto mb-3" />
                   <h4 className="font-bold text-gray-900 mb-2">🎭 Anonymous</h4>
@@ -142,12 +151,11 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => setProfileData({...profileData, is_fully_anonymous: false, visibility_level: 'semi_visible'})}
-                  className={`p-6 rounded-xl border-2 transition-all ${
-                    !profileData.is_fully_anonymous 
-                      ? 'border-purple-500 bg-purple-50 shadow-lg' 
+                  onClick={() => setProfileData({ ...profileData, is_fully_anonymous: false, visibility_level: 'semi_visible' })}
+                  className={`p-6 rounded-xl border-2 transition-all ${!profileData.is_fully_anonymous
+                      ? 'border-purple-500 bg-purple-50 shadow-lg'
                       : 'border-gray-200 hover:border-purple-300'
-                  }`}
+                    }`}
                 >
                   <Eye className="w-12 h-12 text-purple-600 mx-auto mb-3" />
                   <h4 className="font-bold text-gray-900 mb-2">🌟 Visible</h4>
@@ -162,12 +170,11 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                     {emojis.map((emoji) => (
                       <button
                         key={emoji}
-                        onClick={() => setProfileData({...profileData, display_emoji: emoji, display_name: `${emoji} Anonymous`})}
-                        className={`p-3 text-2xl rounded-lg border-2 transition-all ${
-                          profileData.display_emoji === emoji 
-                            ? 'border-purple-500 bg-purple-50 scale-110' 
+                        onClick={() => setProfileData({ ...profileData, display_emoji: emoji, display_name: `${emoji} Anonymous` })}
+                        className={`p-3 text-2xl rounded-lg border-2 transition-all ${profileData.display_emoji === emoji
+                            ? 'border-purple-500 bg-purple-50 scale-110'
                             : 'border-gray-200 hover:border-purple-300'
-                        }`}
+                          }`}
                       >
                         {emoji}
                       </button>
@@ -180,7 +187,7 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Display Name *</label>
                     <Input
                       value={profileData.display_name}
-                      onChange={(e) => setProfileData({...profileData, display_name: e.target.value})}
+                      onChange={(e) => setProfileData({ ...profileData, display_name: e.target.value })}
                       placeholder="How should people call you?"
                       className="border-2 border-purple-200"
                     />
@@ -189,7 +196,7 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Bio (optional)</label>
                     <Textarea
                       value={profileData.bio}
-                      onChange={(e) => setProfileData({...profileData, bio: e.target.value})}
+                      onChange={(e) => setProfileData({ ...profileData, bio: e.target.value })}
                       placeholder="Tell us a bit about yourself..."
                       className="border-2 border-purple-200 h-24"
                     />
@@ -200,7 +207,7 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                       <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                       <Input
                         value={profileData.general_location}
-                        onChange={(e) => setProfileData({...profileData, general_location: e.target.value})}
+                        onChange={(e) => setProfileData({ ...profileData, general_location: e.target.value })}
                         placeholder="e.g., California, USA"
                         className="border-2 border-purple-200 pl-10"
                       />
@@ -234,11 +241,10 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                       ...profileData,
                       goal_categories: toggleArray(profileData.goal_categories, goal)
                     })}
-                    className={`p-4 rounded-lg border-2 transition-all text-sm font-medium ${
-                      profileData.goal_categories.includes(goal)
+                    className={`p-4 rounded-lg border-2 transition-all text-sm font-medium ${profileData.goal_categories.includes(goal)
                         ? 'border-purple-500 bg-purple-50 text-purple-900'
                         : 'border-gray-200 hover:border-purple-300 text-gray-700'
-                    }`}
+                      }`}
                   >
                     {profileData.goal_categories.includes(goal) && (
                       <CheckCircle className="w-4 h-4 text-purple-600 mb-1 mx-auto" />
@@ -273,11 +279,10 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                       ...profileData,
                       looking_for: toggleArray(profileData.looking_for, option)
                     })}
-                    className={`p-4 rounded-lg border-2 transition-all text-sm font-medium ${
-                      profileData.looking_for.includes(option)
+                    className={`p-4 rounded-lg border-2 transition-all text-sm font-medium ${profileData.looking_for.includes(option)
                         ? 'border-purple-500 bg-purple-50 text-purple-900'
                         : 'border-gray-200 hover:border-purple-300 text-gray-700'
-                    }`}
+                      }`}
                   >
                     {profileData.looking_for.includes(option) && (
                       <CheckCircle className="w-4 h-4 text-purple-600 mb-1 mx-auto" />
@@ -328,7 +333,7 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                     <input
                       type="checkbox"
                       checked={profileData.can_be_discovered}
-                      onChange={(e) => setProfileData({...profileData, can_be_discovered: e.target.checked})}
+                      onChange={(e) => setProfileData({ ...profileData, can_be_discovered: e.target.checked })}
                       className="w-5 h-5 text-purple-600"
                     />
                     <div>
@@ -343,7 +348,7 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                     <input
                       type="checkbox"
                       checked={profileData.is_open_to_new_connections}
-                      onChange={(e) => setProfileData({...profileData, is_open_to_new_connections: e.target.checked})}
+                      onChange={(e) => setProfileData({ ...profileData, is_open_to_new_connections: e.target.checked })}
                       className="w-5 h-5 text-pink-600"
                     />
                     <div>
@@ -358,7 +363,7 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                     <input
                       type="checkbox"
                       checked={profileData.matchmaking_enabled}
-                      onChange={(e) => setProfileData({...profileData, matchmaking_enabled: e.target.checked})}
+                      onChange={(e) => setProfileData({ ...profileData, matchmaking_enabled: e.target.checked })}
                       className="w-5 h-5 text-blue-600"
                     />
                     <div>

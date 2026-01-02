@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import CustomInputOTP from '@/components/ui/CustomInputOTP';
@@ -19,8 +19,10 @@ export default function FamilyAccess() {
     }
     setIsLoading(true);
     try {
-      const { data } = await base44.functions.invoke('validateAccessCode', { access_code: code });
-      if (data.success && data.familyId) {
+      const { data, error } = await supabase.functions.invoke('validateAccessCode', {
+        body: { access_code: code }
+      });
+      if (data?.success && data?.familyId) {
         toast.success('Access granted! Loading shared view...');
         // Store session access info
         sessionStorage.setItem('sharedAccessFamilyId', data.familyId);
@@ -47,7 +49,7 @@ export default function FamilyAccess() {
         <Card className="w-full max-w-md shadow-2xl bg-white/70 backdrop-blur-xl border-white/80">
           <CardHeader className="text-center">
             <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center mb-4 shadow-lg">
-                <KeyRound className="w-8 h-8 text-white" />
+              <KeyRound className="w-8 h-8 text-white" />
             </div>
             <CardTitle className="text-3xl font-bold text-gray-900">Family Access</CardTitle>
             <CardDescription className="text-gray-600 pt-2">

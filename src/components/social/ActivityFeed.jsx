@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -67,7 +67,17 @@ export default function ActivityFeed({ friends }) {
 
   const { data: user } = useQuery({
     queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryFn: async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    }
   });
 
   const friendEmails = friends.map(f => f.email);
@@ -76,50 +86,83 @@ export default function ActivityFeed({ friends }) {
     queryKey: ['friend-activities', friendEmails],
     queryFn: async () => {
       if (friendEmails.length === 0) return [];
-      
-      const allActivities = await base44.asServiceRole.entities.FriendActivity.list('-created_date', 50);
-      
-      return allActivities.filter(activity => 
-        friendEmails.includes(activity.created_by) || activity.created_by === user?.email
+
+      const { data, error } = await supabase
+        .from('friend_activities')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+
+      return data.filter(activity =>
+        friendEmails.includes(activity.user_email) || activity.user_email === user?.email
       );
     },
-    enabled: friendEmails.length > 0
+    enabled: !!user && friendEmails.length > 0
   });
 
   const { data: myReactions = [] } = useQuery({
-    queryKey: ['my-cheer-reactions'],
-    queryFn: () => base44.entities.CheerReaction.filter({ cheerer_email: user?.email }),
+    queryKey: ['my-cheer-reactions', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('cheer_reactions')
+        .select('*')
+        .eq('cheerer_id', user.id);
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!user
   });
 
   const { data: allComments = [] } = useQuery({
     queryKey: ['activity-comments'],
-    queryFn: () => base44.entities.ActivityComment.list('-created_date')
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('activity_comments')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
   });
 
   const cheerMutation = useMutation({
     mutationFn: async ({ activityId, activityOwnerId, reactionType }) => {
       // Check if already cheered
-      const existing = await base44.entities.CheerReaction.filter({
-        activity_id: activityId,
-        cheerer_email: user.email
-      });
+      const { data: existing, error: fetchError } = await supabase
+        .from('cheer_reactions')
+        .select('*')
+        .eq('activity_id', activityId)
+        .eq('cheerer_id', user.id);
 
-      if (existing.length > 0) {
+      if (fetchError) throw fetchError;
+
+      if (existing && existing.length > 0) {
         // Update existing cheer
-        return base44.entities.CheerReaction.update(existing[0].id, {
-          reaction_type: reactionType
-        });
-      }
+        const { error: updateError } = await supabase
+          .from('cheer_reactions')
+          .update({
+            reaction_type: reactionType
+          })
+          .eq('id', existing[0].id);
 
-      return base44.entities.CheerReaction.create({
-        activity_id: activityId,
-        cheerer_email: user.email,
-        cheerer_name: user.full_name,
-        cheerer_avatar: user.avatar_url,
-        recipient_email: activityOwnerId,
-        reaction_type: reactionType
-      });
+        if (updateError) throw updateError;
+      } else {
+        const { error: createError } = await supabase
+          .from('cheer_reactions')
+          .insert({
+            activity_id: activityId,
+            cheerer_id: user.id,
+            cheerer_email: user.email,
+            cheerer_name: user.full_name,
+            cheerer_avatar: user.avatar_url,
+            recipient_email: activityOwnerId,
+            reaction_type: reactionType
+          });
+
+        if (createError) throw createError;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['friend-activities']);
@@ -130,13 +173,17 @@ export default function ActivityFeed({ friends }) {
 
   const commentMutation = useMutation({
     mutationFn: async ({ activityId }) => {
-      return base44.entities.ActivityComment.create({
-        activity_id: activityId,
-        commenter_email: user.email,
-        commenter_name: user.full_name,
-        commenter_avatar: user.avatar_url,
-        comment_text: commentText
-      });
+      const { error } = await supabase
+        .from('activity_comments')
+        .insert({
+          activity_id: activityId,
+          commenter_id: user.id,
+          commenter_email: user.email,
+          commenter_name: user.full_name,
+          commenter_avatar: user.avatar_url,
+          comment_text: commentText
+        });
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['activity-comments']);
@@ -158,7 +205,7 @@ export default function ActivityFeed({ friends }) {
           <p className="text-gray-600 mb-4">
             Add friends to see their amazing achievements here!
           </p>
-          <Button onClick={() => {}} className="bg-purple-600">
+          <Button onClick={() => { }} className="bg-purple-600">
             Find Friends
           </Button>
         </CardContent>
@@ -247,11 +294,10 @@ export default function ActivityFeed({ friends }) {
                         activityOwnerId: activity.created_by,
                         reactionType: type
                       })}
-                      className={`px-3 py-1.5 rounded-full text-lg transition-all ${
-                        myCheer?.reaction_type === type
-                          ? 'bg-purple-600 scale-110'
-                          : 'bg-gray-100 hover:bg-purple-100 hover:scale-110'
-                      }`}
+                      className={`px-3 py-1.5 rounded-full text-lg transition-all ${myCheer?.reaction_type === type
+                        ? 'bg-purple-600 scale-110'
+                        : 'bg-gray-100 hover:bg-purple-100 hover:scale-110'
+                        }`}
                     >
                       {emoji}
                     </button>

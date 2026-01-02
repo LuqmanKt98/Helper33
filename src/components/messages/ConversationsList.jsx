@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { base44 } from '@/api/base44Client';
-import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabaseClient';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -14,86 +14,68 @@ import {
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
-export default function ConversationsList({ 
-  currentUser, 
-  onSelectConversation, 
+export default function ConversationsList({
+  currentUser,
+  onSelectConversation,
   onNewMessage,
-  selectedConversationId 
+  selectedConversationId
 }) {
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Get all messages for current user
-  const { data: allMessages = [], isLoading } = useQuery({
-    queryKey: ['allDirectMessages', currentUser?.email],
+  // Get all conversations for current user
+  const { data: conversations = [], isLoading } = useQuery({
+    queryKey: ['allDirectConversations', currentUser?.id],
     queryFn: async () => {
-      if (!currentUser?.email) return [];
-      const messages = await base44.entities.DirectMessage.filter(
-        {},
-        '-created_date',
-        500
-      );
-      return messages.filter(m => 
-        (m.sender_email === currentUser.email && !m.is_deleted_by_sender) ||
-        (m.recipient_email === currentUser.email && !m.is_deleted_by_recipient)
-      );
+      if (!currentUser?.id) return [];
+      const { data, error } = await supabase
+        .from('direct_conversations')
+        .select(`
+          *,
+          participant_1:profiles!participant_1_id(id, email, full_name, avatar_url),
+          participant_2:profiles!participant_2_id(id, email, full_name, avatar_url)
+        `)
+        .or(`participant_1_id.eq.${currentUser.id},participant_2_id.eq.${currentUser.id}`)
+        .order('last_message_time', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
     },
-    enabled: !!currentUser?.email,
+    enabled: !!currentUser?.id,
     refetchInterval: 5000
   });
 
-  // Get unread count
-  const { data: unreadCount = 0 } = useQuery({
-    queryKey: ['unreadMessages', currentUser?.email],
-    queryFn: async () => {
-      if (!currentUser?.email) return 0;
-      const unread = allMessages.filter(
-        m => m.recipient_email === currentUser.email && !m.is_read
-      );
-      return unread.length;
-    },
-    enabled: !!currentUser?.email && allMessages.length > 0
-  });
+  // Get unread count across all conversations
+  const unreadCount = conversations.reduce((acc, conv) => {
+    const countsAsP1 = conv.participant_1_id === currentUser.id;
+    return acc + (countsAsP1 ? conv.unread_count_p1 : conv.unread_count_p2);
+  }, 0);
 
-  // Group messages by conversation
-  const conversations = React.useMemo(() => {
-    const convMap = {};
-    
-    allMessages.forEach(msg => {
-      const convId = msg.conversation_id;
-      if (!convMap[convId]) {
-        const isUserSender = msg.sender_email === currentUser.email;
-        convMap[convId] = {
-          id: convId,
-          recipientId: isUserSender ? msg.recipient_id : msg.sender_id,
-          recipientEmail: isUserSender ? msg.recipient_email : msg.sender_email,
-          recipientName: isUserSender ? msg.recipient_name : msg.sender_name,
-          recipientAvatar: isUserSender ? null : msg.sender_avatar,
-          lastMessage: msg,
-          unreadCount: 0,
-          messages: []
-        };
-      }
-      
-      convMap[convId].messages.push(msg);
-      
-      // Update last message if newer
-      if (new Date(msg.created_date) > new Date(convMap[convId].lastMessage.created_date)) {
-        convMap[convId].lastMessage = msg;
-      }
-      
-      // Count unread
-      if (msg.recipient_email === currentUser.email && !msg.is_read) {
-        convMap[convId].unreadCount++;
-      }
+  // Process conversations for display
+  const processedConversations = React.useMemo(() => {
+    return conversations.map(conv => {
+      const isParticipant1 = conv.participant_1_id === currentUser.id;
+      const other = isParticipant1 ? conv.participant_2 : conv.participant_1;
+      const unreadCount = isParticipant1 ? conv.unread_count_p1 : conv.unread_count_p2;
+
+      return {
+        id: conv.id,
+        recipientId: other.id,
+        recipientEmail: other.email,
+        recipientName: other.full_name,
+        recipientAvatar: other.avatar_url,
+        lastMessage: {
+          content: conv.last_message_content,
+          created_date: conv.last_message_time,
+          sender_id: conv.last_message_sender_id
+        },
+        unreadCount,
+        streakDays: conv.streak_days
+      };
     });
-
-    return Object.values(convMap).sort(
-      (a, b) => new Date(b.lastMessage.created_date) - new Date(a.lastMessage.created_date)
-    );
-  }, [allMessages, currentUser?.email]);
+  }, [conversations, currentUser?.id]);
 
   // Filter conversations by search
-  const filteredConversations = conversations.filter(conv =>
+  const filteredConversations = processedConversations.filter(conv =>
     conv.recipientName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     conv.lastMessage?.content?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -174,13 +156,12 @@ export default function ConversationsList({
               >
                 <button
                   onClick={() => onSelectConversation(conv)}
-                  className={`w-full p-4 flex items-center gap-3 hover:bg-purple-50 transition-all border-b border-gray-100 ${
-                    selectedConversationId === conv.id ? 'bg-purple-100' : ''
-                  }`}
+                  className={`w-full p-4 flex items-center gap-3 hover:bg-purple-50 transition-all border-b border-gray-100 ${selectedConversationId === conv.id ? 'bg-purple-100' : ''
+                    }`}
                 >
                   {/* Avatar */}
                   {conv.recipientAvatar ? (
-                    <img 
+                    <img
                       src={conv.recipientAvatar}
                       alt={conv.recipientName}
                       className="w-12 h-12 rounded-full object-cover border-2 border-purple-200"

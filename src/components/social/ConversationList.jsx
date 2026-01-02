@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
@@ -11,31 +11,48 @@ import { createPageUrl } from '@/utils';
 export default function ConversationList() {
   const { data: user } = useQuery({
     queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user;
+    }
   });
 
   const { data: conversations = [], isLoading } = useQuery({
-    queryKey: ['conversations'],
-    queryFn: () => base44.entities.Conversation.filter({
-      participant_emails: { $contains: user?.email }
-    }, '-last_message_time'),
+    queryKey: ['allDirectConversations', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('direct_conversations')
+        .select(`
+          *,
+          p1:participant_1_id (id, full_name, avatar_url),
+          p2:participant_2_id (id, full_name, avatar_url)
+        `)
+        .or(`participant_1_id.eq.${user.id},participant_2_id.eq.${user.id}`)
+        .order('last_message_time', { ascending: false });
+
+      if (error) throw error;
+      return data;
+    },
     enabled: !!user
   });
 
   const getOtherParticipant = (conversation) => {
     if (!conversation || !user) return null;
-    const otherEmail = conversation.participant_emails?.find(email => email !== user.email);
-    const index = conversation.participant_emails?.indexOf(otherEmail);
+    const isP1 = conversation.participant_1_id === user.id;
+    const other = isP1 ? conversation.p2 : conversation.p1;
     return {
-      email: otherEmail,
-      name: conversation.participant_names?.[index] || 'User',
-      avatar: conversation.participant_avatars?.[index]
+      id: other?.id,
+      name: other?.full_name || 'User',
+      avatar: other?.avatar_url
     };
   };
 
   const getUnreadCount = (conversation) => {
-    if (!user || !conversation.unread_count) return 0;
-    return conversation.unread_count[user.email] || 0;
+    if (!user || !conversation) return 0;
+    return conversation.participant_1_id === user.id
+      ? conversation.unread_count_p1
+      : conversation.unread_count_p2;
   };
 
   if (isLoading) {
@@ -84,9 +101,8 @@ export default function ConversationList() {
               >
                 <Link to={createPageUrl('Messages') + `?conversation=${conversation.id}`}>
                   <div
-                    className={`p-4 cursor-pointer border-b transition-all hover:bg-purple-50 ${
-                      unreadCount > 0 ? 'bg-purple-50/50' : ''
-                    }`}
+                    className={`p-4 cursor-pointer border-b transition-all hover:bg-purple-50 ${unreadCount > 0 ? 'bg-purple-50/50' : ''
+                      }`}
                   >
                     <div className="flex items-start gap-3">
                       <div className="relative">
@@ -111,26 +127,26 @@ export default function ConversationList() {
                           </p>
                           {conversation.last_message_time && (
                             <span className="text-xs text-gray-500">
-                              {new Date(conversation.last_message_time).toLocaleTimeString([], { 
-                                hour: '2-digit', 
-                                minute: '2-digit' 
+                              {new Date(conversation.last_message_time).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit'
                               })}
                             </span>
                           )}
                         </div>
-                        
+
                         <div className="flex items-center justify-between">
                           <p className={`text-sm truncate flex-1 ${unreadCount > 0 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
-                            {conversation.last_message_sender === user.email && 'You: '}
-                            {conversation.last_message || 'Start chatting...'}
+                            {conversation.last_message_sender_id === user.id && 'You: '}
+                            {conversation.last_message_content || 'Start chatting...'}
                           </p>
                         </div>
 
-                        {conversation.conversation_streak_days > 0 && (
+                        {conversation.streak_days > 0 && (
                           <div className="flex items-center gap-1 mt-1">
                             <Flame className="w-3 h-3 text-orange-500" />
                             <span className="text-xs text-orange-600 font-semibold">
-                              {conversation.conversation_streak_days} day streak!
+                              {conversation.streak_days} day streak!
                             </span>
                           </div>
                         )}

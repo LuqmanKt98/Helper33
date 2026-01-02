@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,25 +24,39 @@ export default function AcceptFamilyInvite() {
     }
   }, []);
 
+  const { user: authUser, logout } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me(),
-    retry: false
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const loadInvitation = async (code) => {
     try {
-      const invitations = await base44.entities.FamilySubscriptionMember.filter({
-        invitation_code: code
-      });
-      
-      if (invitations.length === 0) {
+      const { data: invitations, error: inviteError } = await supabase
+        .from('family_subscription_members')
+        .select('*')
+        .eq('invitation_code', code);
+
+      if (inviteError) throw inviteError;
+
+      if (!invitations || invitations.length === 0) {
         setError('Invalid or expired invitation code');
         return;
       }
 
       const invite = invitations[0];
-      
+
       if (invite.status === 'accepted') {
         setError('This invitation has already been accepted');
         return;
@@ -62,23 +77,34 @@ export default function AcceptFamilyInvite() {
   const acceptMutation = useMutation({
     mutationFn: async () => {
       if (!user) {
-        base44.auth.redirectToLogin(window.location.pathname + window.location.search);
+        // Redirection logic should be handled by the app's auth flow
+        navigate(createPageUrl('Login') + `?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`);
         return;
       }
 
       // Update invitation status
-      await base44.entities.FamilySubscriptionMember.update(invitation.id, {
-        status: 'accepted',
-        accepted_at: new Date().toISOString(),
-        member_name: user.full_name || invitation.member_name
-      });
+      const { error: inviteError } = await supabase
+        .from('family_subscription_members')
+        .update({
+          status: 'accepted',
+          accepted_at: new Date().toISOString(),
+          member_name: user.full_name || invitation.member_name
+        })
+        .eq('id', invitation.id);
 
-      // Update user's subscription access
-      await base44.auth.updateMe({
-        subscription_status: 'active',
-        plan_type: 'family_shared',
-        family_plan_owner: invitation.primary_user_email
-      });
+      if (inviteError) throw inviteError;
+
+      // Update user's subscription access in profiles
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          subscription_status: 'active',
+          plan_type: 'family_shared',
+          family_plan_owner: invitation.primary_user_email
+        })
+        .eq('id', user.id);
+
+      if (profileError) throw profileError;
 
       return true;
     },
@@ -187,7 +213,7 @@ export default function AcceptFamilyInvite() {
                     You need to sign in or create an account to accept this invitation
                   </p>
                   <Button
-                    onClick={() => base44.auth.redirectToLogin(window.location.pathname + window.location.search)}
+                    onClick={() => navigate(createPageUrl('Login') + `?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`)}
                     className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 py-6"
                   >
                     Sign In / Create Account
@@ -214,12 +240,12 @@ export default function AcceptFamilyInvite() {
               ) : (
                 <div className="p-4 bg-yellow-50 border-2 border-yellow-300 rounded-xl">
                   <p className="text-sm text-yellow-800 text-center">
-                    This invitation was sent to <strong>{invitation.member_email}</strong>. 
-                    You're currently signed in as <strong>{user.email}</strong>. 
+                    This invitation was sent to <strong>{invitation.member_email}</strong>.
+                    You're currently signed in as <strong>{user.email}</strong>.
                     Please sign in with the correct account to accept.
                   </p>
                   <Button
-                    onClick={() => base44.auth.logout()}
+                    onClick={() => logout()}
                     variant="outline"
                     className="w-full mt-3"
                   >

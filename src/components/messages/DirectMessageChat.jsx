@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -26,11 +26,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { format, isToday, isYesterday } from 'date-fns';
 
-export default function DirectMessageChat({ 
-  conversation, 
-  currentUser, 
-  onBack, 
-  recipientProfile 
+export default function DirectMessageChat({
+  conversation,
+  currentUser,
+  onBack,
+  recipientProfile
 }) {
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef(null);
@@ -40,12 +40,15 @@ export default function DirectMessageChat({
     queryKey: ['directMessages', conversation?.id],
     queryFn: async () => {
       if (!conversation?.id) return [];
-      const allMessages = await base44.entities.DirectMessage.filter(
-        { conversation_id: conversation.id },
-        'created_date',
-        100
-      );
-      return allMessages.filter(m => 
+      const { data, error } = await supabase
+        .from('direct_messages')
+        .select('*')
+        .eq('conversation_id', conversation.id)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      return data.filter(m =>
         (m.sender_email === currentUser.email && !m.is_deleted_by_sender) ||
         (m.recipient_email === currentUser.email && !m.is_deleted_by_recipient)
       );
@@ -61,19 +64,35 @@ export default function DirectMessageChat({
       const unread = messages.filter(
         m => m.recipient_email === currentUser.email && !m.is_read
       );
-      for (const msg of unread) {
-        await base44.entities.DirectMessage.update(msg.id, {
+      if (unread.length === 0) return;
+
+      const { error } = await supabase
+        .from('direct_messages')
+        .update({
           is_read: true,
           read_at: new Date().toISOString()
-        });
+        })
+        .in('id', unread.map(m => m.id));
+
+      if (error) {
+        console.error('Error marking as read:', error);
+        return;
       }
-      if (unread.length > 0) {
-        queryClient.invalidateQueries({ queryKey: ['directMessages'] });
-        queryClient.invalidateQueries({ queryKey: ['unreadMessages'] });
-      }
+
+      // Also update conversation unread count
+      const isParticipant1 = conversation.participant_1_id === currentUser.id;
+      const unreadField = isParticipant1 ? 'unread_count_p1' : 'unread_count_p2';
+
+      await supabase
+        .from('direct_conversations')
+        .update({ [unreadField]: 0 })
+        .eq('id', conversation.id);
+
+      queryClient.invalidateQueries({ queryKey: ['directMessages', conversation?.id] });
+      queryClient.invalidateQueries({ queryKey: ['allDirectConversations'] });
     };
     markAsRead();
-  }, [messages, currentUser.email]);
+  }, [messages, currentUser.email, conversation.id]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -86,7 +105,6 @@ export default function DirectMessageChat({
         sender_id: currentUser.id,
         sender_email: currentUser.email,
         sender_name: currentUser.full_name || currentUser.email,
-        sender_avatar: currentUser.avatar_url,
         recipient_id: recipientProfile?.created_by || conversation.recipientId,
         recipient_email: recipientProfile?.created_by || conversation.recipientEmail,
         recipient_name: recipientProfile?.display_name || conversation.recipientName,
@@ -94,11 +112,37 @@ export default function DirectMessageChat({
         conversation_id: conversation.id,
         is_read: false
       };
-      return await base44.entities.DirectMessage.create(message);
+
+      const { data, error: msgError } = await supabase
+        .from('direct_messages')
+        .insert(message)
+        .select()
+        .single();
+
+      if (msgError) throw msgError;
+
+      // Update conversation last message
+      const isParticipant1 = conversation.participant_1_id === currentUser.id;
+      const otherUnreadField = isParticipant1 ? 'unread_count_p2' : 'unread_count_p1';
+
+      const { error: convError } = await supabase
+        .from('direct_conversations')
+        .update({
+          last_message_content: content,
+          last_message_time: new Date().toISOString(),
+          last_message_sender_id: currentUser.id,
+          [otherUnreadField]: conversation[otherUnreadField] + 1
+        })
+        .eq('id', conversation.id);
+
+      if (convError) console.error('Error updating conversation:', convError);
+
+      return data;
     },
     onSuccess: () => {
       setNewMessage('');
       queryClient.invalidateQueries({ queryKey: ['directMessages', conversation?.id] });
+      queryClient.invalidateQueries({ queryKey: ['allDirectConversations'] });
     }
   });
 
@@ -117,7 +161,7 @@ export default function DirectMessageChat({
   const groupMessagesByDate = (msgs) => {
     const groups = {};
     msgs.forEach(msg => {
-      const date = format(new Date(msg.created_date), 'yyyy-MM-dd');
+      const date = format(new Date(msg.created_at || msg.created_date), 'yyyy-MM-dd');
       if (!groups[date]) groups[date] = [];
       groups[date].push(msg);
     });
@@ -133,11 +177,11 @@ export default function DirectMessageChat({
         <Button variant="ghost" size="icon" onClick={onBack}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
-        
+
         <div className="flex items-center gap-3 flex-1">
           {recipientProfile?.avatar_url ? (
-            <img 
-              src={recipientProfile.avatar_url} 
+            <img
+              src={recipientProfile.avatar_url}
               alt={recipientProfile.display_name}
               className="w-10 h-10 rounded-full object-cover border-2 border-purple-300"
             />
@@ -200,12 +244,12 @@ export default function DirectMessageChat({
             <div key={date}>
               <div className="flex items-center justify-center my-4">
                 <Badge variant="outline" className="bg-white/80 text-gray-600">
-                  {isToday(new Date(date)) ? 'Today' : 
-                   isYesterday(new Date(date)) ? 'Yesterday' : 
-                   format(new Date(date), 'MMMM d, yyyy')}
+                  {isToday(new Date(date)) ? 'Today' :
+                    isYesterday(new Date(date)) ? 'Yesterday' :
+                      format(new Date(date), 'MMMM d, yyyy')}
                 </Badge>
               </div>
-              
+
               <AnimatePresence>
                 {msgs.map((msg, idx) => {
                   const isSender = msg.sender_email === currentUser.email;
@@ -220,11 +264,10 @@ export default function DirectMessageChat({
                     >
                       <div className={`max-w-[75%] ${isSender ? 'order-2' : 'order-1'}`}>
                         <div
-                          className={`rounded-2xl px-4 py-2.5 shadow-sm ${
-                            isSender
+                          className={`rounded-2xl px-4 py-2.5 shadow-sm ${isSender
                               ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-br-md'
                               : 'bg-white border border-purple-200 text-gray-800 rounded-bl-md'
-                          }`}
+                            }`}
                         >
                           <p className="text-sm leading-relaxed whitespace-pre-wrap">
                             {msg.content}
@@ -232,7 +275,7 @@ export default function DirectMessageChat({
                         </div>
                         <div className={`flex items-center gap-1 mt-1 ${isSender ? 'justify-end' : 'justify-start'}`}>
                           <span className="text-xs text-gray-500">
-                            {formatMessageTime(msg.created_date)}
+                            {formatMessageTime(msg.created_at || msg.created_date)}
                           </span>
                           {isSender && (
                             msg.is_read ? (
@@ -262,7 +305,7 @@ export default function DirectMessageChat({
           <Button variant="ghost" size="icon" className="text-gray-500 hover:text-purple-600">
             <ImageIcon className="w-5 h-5" />
           </Button>
-          
+
           <Input
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
@@ -270,7 +313,7 @@ export default function DirectMessageChat({
             placeholder="Type a message..."
             className="flex-1 border-purple-200 focus:border-purple-400 rounded-full"
           />
-          
+
           <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
             <Button
               onClick={handleSend}

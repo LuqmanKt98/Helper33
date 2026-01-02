@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Sparkles } from 'lucide-react';
@@ -23,29 +23,47 @@ export default function CheerButton({ activityId, activityOwnerId, currentCheer,
 
   const { data: user } = useQuery({
     queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      return profile;
+    }
   });
 
   const cheerMutation = useMutation({
     mutationFn: async (reactionType) => {
       if (currentCheer) {
-        return base44.entities.CheerReaction.update(currentCheer.id, {
-          reaction_type: reactionType
-        });
+        const { error } = await supabase
+          .from('cheer_reactions')
+          .update({
+            reaction_type: reactionType
+          })
+          .eq('id', currentCheer.id);
+        if (error) throw error;
+        return;
       }
 
-      return base44.entities.CheerReaction.create({
-        activity_id: activityId,
-        cheerer_email: user.email,
-        cheerer_name: user.full_name,
-        cheerer_avatar: user.avatar_url,
-        recipient_email: activityOwnerId,
-        reaction_type: reactionType
-      });
+      const { error } = await supabase
+        .from('cheer_reactions')
+        .insert({
+          activity_id: activityId,
+          cheerer_id: user.id,
+          cheerer_email: user.email,
+          cheerer_name: user.full_name,
+          cheerer_avatar: user.avatar_url,
+          recipient_id: activityOwnerId, // Assuming this is a UUID
+          reaction_type: reactionType
+        });
+      if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['friend-activities']);
-      queryClient.invalidateQueries(['my-cheer-reactions']);
+      queryClient.invalidateQueries({ queryKey: ['friend-activities'] });
+      queryClient.invalidateQueries({ queryKey: ['my-cheer-reactions'] });
       setIsOpen(false);
     }
   });
@@ -54,8 +72,8 @@ export default function CheerButton({ activityId, activityOwnerId, currentCheer,
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         {currentCheer ? (
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size={compact ? 'sm' : 'default'}
             className="bg-purple-100 border-purple-400"
           >
@@ -63,7 +81,7 @@ export default function CheerButton({ activityId, activityOwnerId, currentCheer,
             Cheered
           </Button>
         ) : (
-          <Button 
+          <Button
             variant="outline"
             size={compact ? 'sm' : 'default'}
           >

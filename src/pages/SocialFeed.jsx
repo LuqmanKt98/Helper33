@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,17 +28,36 @@ import SEO from '@/components/SEO';
 export default function SocialFeed() {
   const [activeTab, setActiveTab] = useState('feed');
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: userStats } = useQuery({
-    queryKey: ['user-stats'],
+    queryKey: ['user-stats', user?.id],
     queryFn: async () => {
-      const stats = await base44.entities.UserStats.filter({});
-      return stats[0];
-    }
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from('profiles') // Check for stats in profiles or a separate table
+        .select('gamification_stats')
+        .eq('id', user.id)
+        .single();
+      if (error) return null;
+      return data.gamification_stats;
+    },
+    enabled: !!user
   });
 
   // Fetch friend requests to build friends list
@@ -45,44 +65,47 @@ export default function SocialFeed() {
     queryKey: ['friend-requests'],
     queryFn: async () => {
       if (!user) return [];
-      
-      const sent = await base44.entities.FriendRequest.filter({
-        requester_email: user.email,
-        status: 'accepted'
-      });
-      
-      const received = await base44.entities.FriendRequest.filter({
-        receiver_email: user.email,
-        status: 'accepted'
-      });
 
-      return [...sent, ...received];
+      const { data, error } = await supabase
+        .from('friend_requests')
+        .select(`
+          *,
+          requester:profiles!requester_id(id, email, full_name, avatar_url),
+          receiver:profiles!receiver_id(id, email, full_name, avatar_url)
+        `)
+        .or(`requester_id.eq.${user.id},receiver_id.eq.${user.id}`)
+        .eq('status', 'accepted');
+
+      if (error) throw error;
+      return data || [];
     },
     enabled: !!user
   });
 
-  // Build friends list from accepted requests
+  // Build friends list from accepted family members (placeholder for social friends)
+  // Build friends list from accepted friend requests
   const friends = friendRequests.map(request => {
-    const isSent = request.requester_email === user?.email;
+    const friendProfile = request.requester_id === user.id ? request.receiver : request.requester;
     return {
-      email: isSent ? request.receiver_email : request.requester_email,
-      name: isSent ? request.receiver_name : request.requester_name,
-      avatar: isSent ? request.receiver_avatar : request.requester_avatar,
-      since: request.accepted_at
+      id: friendProfile.id,
+      email: friendProfile.email,
+      name: friendProfile.full_name,
+      avatar: friendProfile.avatar_url,
+      since: request.updated_at
     };
   });
 
   const { data: unreadConversations = [] } = useQuery({
-    queryKey: ['unread-conversations'],
+    queryKey: ['unread-conversations', user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const conversations = await base44.entities.Conversation.filter({
-        participant_emails: { $contains: user.email }
-      });
-      return conversations.filter(c => {
-        const unreadCount = c.unread_count?.[user.email] || 0;
-        return unreadCount > 0;
-      });
+      const { data, error } = await supabase
+        .from('companion_messages')
+        .select('*')
+        .eq('is_read', false);
+
+      if (error) throw error;
+      return data;
     },
     enabled: !!user
   });
@@ -99,12 +122,15 @@ export default function SocialFeed() {
 
   return (
     <>
-      <SEO 
+      <SEO
         title="Social Feed - DobryLife | Connect & Share Your Journey"
         description="Share your wellness journey, connect with friends, celebrate achievements, and support each other. Build meaningful connections in a safe, therapeutic space."
         keywords="wellness social network, mental health community, share progress, wellness friends, achievement sharing, supportive community, mental wellness connections"
+        ogTitle="Social Feed - DobryLife"
+        ogDescription="Share your wellness journey, connect with friends, and support each other."
+        ogUrl={window.location.href}
       />
-      
+
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 p-4 sm:p-6">
         {/* Header */}
         <motion.div
@@ -197,17 +223,17 @@ export default function SocialFeed() {
         </div>
 
         {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={setActiveTab} defaultValue="feed" className="w-full">
           <TabsList className="grid w-full grid-cols-3 mb-6">
-            <TabsTrigger value="feed">
+            <TabsTrigger value="feed" className="flex items-center">
               <TrendingUp className="w-4 h-4 mr-2" />
               Activity Feed
             </TabsTrigger>
-            <TabsTrigger value="friends">
+            <TabsTrigger value="friends" className="flex items-center">
               <Users className="w-4 h-4 mr-2" />
               Friends ({friends.length})
             </TabsTrigger>
-            <TabsTrigger value="messages">
+            <TabsTrigger value="messages" className="flex items-center">
               <MessageCircle className="w-4 h-4 mr-2" />
               Messages
               {unreadConversations.length > 0 && (

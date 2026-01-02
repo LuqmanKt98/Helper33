@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -23,26 +23,37 @@ export default function Messages() {
 
   const { data: user, isLoading: userLoading } = useQuery({
     queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me()
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      return profile;
+    }
   });
 
   // Get recipient profile when conversation is selected
   const { data: recipientProfile } = useQuery({
     queryKey: ['recipientProfile', selectedConversation?.recipientEmail],
     queryFn: async () => {
-      if (!selectedConversation?.recipientEmail) return null;
-      const profiles = await base44.entities.CommunityProfile.filter({
-        created_by: selectedConversation.recipientEmail
-      });
-      return profiles[0] || null;
+      if (!selectedConversation?.recipientId) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', selectedConversation.recipientId)
+        .single();
+      return data || null;
     },
-    enabled: !!selectedConversation?.recipientEmail
+    enabled: !!selectedConversation?.recipientId
   });
 
   const handleConversationCreated = (conversation) => {
     setSelectedConversation(conversation);
     setShowNewMessage(false);
-    queryClient.invalidateQueries({ queryKey: ['allDirectMessages'] });
+    queryClient.invalidateQueries({ queryKey: ['allDirectConversations'] });
   };
 
   if (userLoading) {
@@ -78,11 +89,11 @@ export default function Messages() {
 
   return (
     <>
-      <SEO 
+      <SEO
         title="Messages - Helper33"
         description="Send and receive direct messages with the Helper33 community"
       />
-      
+
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
         {/* Animated background */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden">

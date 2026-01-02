@@ -1,7 +1,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -39,30 +40,68 @@ import SEO from '@/components/SEO';
 
 export default function WomensHealthHub() {
   const [activeTab, setActiveTab] = useState('cycle');
+  const { user: authUser } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: cycles = [], isLoading: loadingCycles } = useQuery({
-    queryKey: ['menstrual-cycles'],
-    queryFn: () => base44.entities.MenstrualCycle.list('-cycle_start_date')
+    queryKey: ['menstrual-cycles', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('menstrual_cycles')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('cycle_start_date', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: symptoms = [], isLoading: loadingSymptoms } = useQuery({
-    queryKey: ['cycle-symptoms'],
-    queryFn: () => base44.entities.CycleSymptom.list('-log_date', 90)
+    queryKey: ['cycle-symptoms', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('cycle_symptoms')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('log_date', { ascending: false })
+        .limit(90);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   // Renamed from pregnancyData to trackingData to reflect its broader scope
   const { data: trackingData } = useQuery({
-    queryKey: ['pregnancy-tracking'],
+    queryKey: ['pregnancy-tracking', authUser?.id],
     queryFn: async () => {
-      const data = await base44.entities.PregnancyTracking.list();
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('pregnancy_tracking')
+        .select('*')
+        .eq('user_id', authUser.id);
+      if (error) throw error;
       return data; // Return all data, not just the first one directly
-    }
+    },
+    enabled: !!authUser
   });
 
   // Derived pregnancyData from trackingData (assuming one active tracking entry)
@@ -130,7 +169,7 @@ export default function WomensHealthHub() {
     if (currentCycle) {
       const cycleStart = new Date(currentCycle.cycle_start_date);
       const cycleDay = differenceInDays(today, cycleStart) + 1;
-      
+
       // Calculate average cycle length from history
       const completedCycles = cycles.filter(c => c.cycle_length_days);
       const avgCycleLength = completedCycles.length > 0
@@ -143,7 +182,7 @@ export default function WomensHealthHub() {
       // Determine cycle phase
       let currentPhase = 'follicular';
       const isCurrentlyMenstruating = cycleDay <= (currentCycle.period_length_days || 5);
-      
+
       if (isCurrentlyMenstruating) {
         currentPhase = 'menstrual';
       } else if (cycleDay >= 11 && cycleDay <= 16) {
@@ -241,7 +280,7 @@ export default function WomensHealthHub() {
         keywords="period tracker, pregnancy app, postpartum support, baby care tracker, fertility tracking, ovulation calendar, women's health, cycle tracking, pregnancy week by week"
         structuredData={structuredData}
       />
-      
+
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 p-6">
         <div className="max-w-6xl mx-auto">
           {/* Header with Quick Actions */}
@@ -251,12 +290,12 @@ export default function WomensHealthHub() {
             className="text-center mb-6"
           >
             <motion.div
-              animate={{ 
+              animate={{
                 rotate: [0, 5, -5, 0],
                 scale: [1, 1.05, 1]
               }}
-              transition={{ 
-                duration: 3, 
+              transition={{
+                duration: 3,
                 repeat: Infinity,
                 ease: "easeInOut"
               }}
@@ -266,14 +305,14 @@ export default function WomensHealthHub() {
                 <Heart className="w-10 h-10 text-white" />
               </div>
             </motion.div>
-            
+
             <h1 className="text-5xl font-bold mb-2 bg-gradient-to-r from-pink-600 via-rose-600 to-purple-600 bg-clip-text text-transparent">
               Women's Health Hub
             </h1>
             <p className="text-gray-700 text-lg font-medium">
               Track your cycle, understand your body, embrace your wellness journey
             </p>
-            
+
             <div className="flex flex-wrap justify-center gap-3 mt-4">
               <Button
                 asChild
@@ -390,42 +429,42 @@ export default function WomensHealthHub() {
           {/* Main Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full mb-6">
             <TabsList className="grid w-full grid-cols-6 bg-white/80 backdrop-blur-sm p-1 rounded-2xl shadow-lg mb-8">
-              <TabsTrigger 
-                value="cycle" 
+              <TabsTrigger
+                value="cycle"
                 className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-pink-500 data-[state=active]:to-rose-500 data-[state=active]:text-white rounded-xl"
               >
                 <Calendar className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Cycle</span>
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="daily" // Changed from 'symptoms' to 'daily'
                 className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-indigo-500 data-[state=active]:text-white rounded-xl"
               >
                 <Activity className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Daily Log</span>
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="pregnancy"
                 className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-blue-500 data-[state=active]:to-cyan-500 data-[state=active]:text-white rounded-xl"
               >
                 <Baby className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Pregnancy</span>
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="postpartum"
                 className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-rose-500 data-[state=active]:to-pink-500 data-[state=active]:text-white rounded-xl"
               >
                 <Heart className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Postpartum</span>
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="baby-care" // Changed from 'baby' to 'baby-care'
                 className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-green-500 data-[state=active]:to-emerald-500 data-[state=active]:text-white rounded-xl"
               >
                 <Baby className="w-4 h-4 mr-2" />
                 <span className="hidden sm:inline">Baby Care</span>
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="caregiver" // NEW Tab Trigger
                 className="flex items-center gap-2 data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:text-white rounded-xl"
               >
@@ -438,14 +477,14 @@ export default function WomensHealthHub() {
             <TabsContent value="cycle" className="mt-6">
               <div className="grid lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2">
-                  <CycleCalendar 
+                  <CycleCalendar
                     cycles={cycles}
                     symptoms={symptoms}
                     cycleInfo={cycleInfo}
                   />
                 </div>
                 <div>
-                  <CycleInsights 
+                  <CycleInsights
                     cycles={cycles}
                     symptoms={symptoms}
                     cycleInfo={cycleInfo}
@@ -456,7 +495,7 @@ export default function WomensHealthHub() {
 
             {/* Daily Symptom Log Tab - value changed to 'daily' */}
             <TabsContent value="daily" className="mt-6">
-              <DailySymptomLogger 
+              <DailySymptomLogger
                 currentCycle={cycles.find(c => c.is_current_cycle)}
                 cycleInfo={cycleInfo}
               />
@@ -465,12 +504,12 @@ export default function WomensHealthHub() {
             {/* Fertility Tab - Retained as per "preserve all other features" */}
             <TabsContent value="fertility" className="mt-6">
               <div className="grid lg:grid-cols-2 gap-6">
-                <FertilityCalendar 
+                <FertilityCalendar
                   cycles={cycles}
                   symptoms={symptoms}
                   cycleInfo={cycleInfo}
                 />
-                <OvulationTracker 
+                <OvulationTracker
                   cycles={cycles}
                   symptoms={symptoms}
                   cycleInfo={cycleInfo}
@@ -480,7 +519,7 @@ export default function WomensHealthHub() {
 
             {/* Pregnancy Tab */}
             <TabsContent value="pregnancy" className="mt-6">
-              <PregnancyDashboard 
+              <PregnancyDashboard
                 pregnancyData={pregnancyData}
                 lastPeriod={cycles[0]?.cycle_start_date}
               />
@@ -520,7 +559,7 @@ export default function WomensHealthHub() {
                 <div>
                   <h3 className="font-bold text-purple-900 mb-2">🔒 Your Data is Private & Secure</h3>
                   <p className="text-sm text-purple-800">
-                    All your health data is encrypted and only visible to you. We never share your cycle, fertility, 
+                    All your health data is encrypted and only visible to you. We never share your cycle, fertility,
                     or pregnancy information with anyone. Your wellness journey is completely private.
                   </p>
                 </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,21 +30,35 @@ export default function ResourceLibrary() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedArticle, setSelectedArticle] = useState(null);
+  const { user: authUser } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: articles = [], isLoading } = useQuery({
-    queryKey: ['educational-articles'],
-    queryFn: () => base44.entities.EducationalArticle.filter({ is_published: true })
+    queryKey: ['educational-articles', authUser?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('educational_articles')
+        .select('*')
+        .eq('is_published', true);
+      if (error) throw error;
+      return data;
+    }
   });
 
   const markHelpfulMutation = useMutation({
     mutationFn: async (articleId) => {
       const article = articles.find(a => a.id === articleId);
       if (!article) return;
-      
-      return await base44.asServiceRole.entities.EducationalArticle.update(articleId, {
-        helpful_count: (article.helpful_count || 0) + 1
-      });
+
+      const { data, error } = await supabase
+        .from('educational_articles')
+        .update({ helpful_count: (article.helpful_count || 0) + 1 })
+        .eq('id', articleId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['educational-articles'] });
@@ -55,10 +70,11 @@ export default function ResourceLibrary() {
     mutationFn: async (articleId) => {
       const article = articles.find(a => a.id === articleId);
       if (!article) return;
-      
-      return await base44.asServiceRole.entities.EducationalArticle.update(articleId, {
-        view_count: (article.view_count || 0) + 1
-      });
+
+      return await supabase
+        .from('educational_articles')
+        .update({ view_count: (article.view_count || 0) + 1 })
+        .eq('id', articleId);
     }
   });
 
@@ -78,8 +94,8 @@ export default function ResourceLibrary() {
   const filteredArticles = articles.filter(article => {
     const matchesCategory = activeCategory === 'all' || article.category === activeCategory;
     const matchesSearch = article.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         article.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         article.tags?.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
+      article.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      article.tags?.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCategory && matchesSearch;
   });
 
@@ -111,8 +127,8 @@ export default function ResourceLibrary() {
             <Card className="bg-white/95 backdrop-blur-sm shadow-2xl">
               {selectedArticle.featured_image_url && (
                 <div className="w-full h-64 sm:h-80 overflow-hidden rounded-t-xl">
-                  <img 
-                    src={selectedArticle.featured_image_url} 
+                  <img
+                    src={selectedArticle.featured_image_url}
                     alt={selectedArticle.title}
                     className="w-full h-full object-cover"
                   />
@@ -122,7 +138,7 @@ export default function ResourceLibrary() {
                 <Badge className="mb-4 capitalize bg-gradient-to-r from-purple-500 to-pink-500">
                   {selectedArticle.category.replace(/_/g, ' ')}
                 </Badge>
-                
+
                 <h1 className="text-3xl sm:text-5xl font-bold text-gray-900 mb-4">
                   {selectedArticle.title}
                 </h1>
@@ -192,15 +208,15 @@ export default function ResourceLibrary() {
                 <div className="prose prose-lg max-w-none mb-8">
                   <ReactMarkdown
                     components={{
-                      h1: ({node, ...props}) => <h1 className="text-3xl font-bold text-gray-900 mt-8 mb-4" {...props} />,
-                      h2: ({node, ...props}) => <h2 className="text-2xl font-bold text-gray-900 mt-6 mb-3" {...props} />,
-                      h3: ({node, ...props}) => <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2" {...props} />,
-                      p: ({node, ...props}) => <p className="text-gray-700 leading-relaxed mb-4" {...props} />,
-                      ul: ({node, ...props}) => <ul className="list-disc list-inside space-y-2 mb-4 text-gray-700" {...props} />,
-                      ol: ({node, ...props}) => <ol className="list-decimal list-inside space-y-2 mb-4 text-gray-700" {...props} />,
-                      strong: ({node, ...props}) => <strong className="font-bold text-gray-900" {...props} />,
-                      code: ({node, ...props}) => <code className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm" {...props} />,
-                      blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-purple-500 pl-4 italic text-gray-600 my-4" {...props} />
+                      h1: ({ node, ...props }) => <h1 className="text-3xl font-bold text-gray-900 mt-8 mb-4" {...props} />,
+                      h2: ({ node, ...props }) => <h2 className="text-2xl font-bold text-gray-900 mt-6 mb-3" {...props} />,
+                      h3: ({ node, ...props }) => <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2" {...props} />,
+                      p: ({ node, ...props }) => <p className="text-gray-700 leading-relaxed mb-4" {...props} />,
+                      ul: ({ node, ...props }) => <ul className="list-disc list-inside space-y-2 mb-4 text-gray-700" {...props} />,
+                      ol: ({ node, ...props }) => <ol className="list-decimal list-inside space-y-2 mb-4 text-gray-700" {...props} />,
+                      strong: ({ node, ...props }) => <strong className="font-bold text-gray-900" {...props} />,
+                      code: ({ node, ...props }) => <code className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-sm" {...props} />,
+                      blockquote: ({ node, ...props }) => <blockquote className="border-l-4 border-purple-500 pl-4 italic text-gray-600 my-4" {...props} />
                     }}
                   >
                     {selectedArticle.content}
@@ -310,7 +326,7 @@ export default function ResourceLibrary() {
               <BookOpen className="w-10 h-10 text-white" />
             </div>
           </motion.div>
-          
+
           <h1 className="text-4xl sm:text-5xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent mb-2">
             Resource Library
           </h1>
@@ -357,14 +373,14 @@ export default function ResourceLibrary() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.1 }}
                   >
-                    <Card 
+                    <Card
                       className="bg-white/90 backdrop-blur-sm shadow-xl hover:shadow-2xl transition-all cursor-pointer h-full group"
                       onClick={() => handleArticleClick(article)}
                     >
                       {article.featured_image_url && (
                         <div className="w-full h-48 overflow-hidden rounded-t-xl">
-                          <img 
-                            src={article.featured_image_url} 
+                          <img
+                            src={article.featured_image_url}
                             alt={article.title}
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                           />
@@ -409,7 +425,7 @@ export default function ResourceLibrary() {
           {categories.map(cat => {
             const Icon = cat.icon;
             const count = articles.filter(a => cat.key === 'all' || a.category === cat.key).length;
-            
+
             return (
               <motion.button
                 key={cat.key}
@@ -460,7 +476,7 @@ export default function ResourceLibrary() {
               {filteredArticles.map((article, idx) => {
                 const categoryInfo = categories.find(c => c.key === article.category);
                 const Icon = categoryInfo?.icon || BookOpen;
-                
+
                 return (
                   <motion.div
                     key={article.id}
@@ -468,14 +484,14 @@ export default function ResourceLibrary() {
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: idx * 0.05 }}
                   >
-                    <Card 
+                    <Card
                       className="bg-white/90 backdrop-blur-sm shadow-lg hover:shadow-2xl transition-all cursor-pointer h-full flex flex-col group"
                       onClick={() => handleArticleClick(article)}
                     >
                       {article.featured_image_url && (
                         <div className="w-full h-48 overflow-hidden rounded-t-xl">
-                          <img 
-                            src={article.featured_image_url} 
+                          <img
+                            src={article.featured_image_url}
                             alt={article.title}
                             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                           />
@@ -493,11 +509,11 @@ export default function ResourceLibrary() {
                             </Badge>
                           )}
                         </div>
-                        
+
                         <h3 className="text-lg font-bold text-gray-900 mb-2 line-clamp-2 group-hover:text-purple-600 transition-colors">
                           {article.title}
                         </h3>
-                        
+
                         <p className="text-sm text-gray-600 mb-4 line-clamp-3 flex-1">
                           {article.summary}
                         </p>
@@ -550,7 +566,7 @@ export default function ResourceLibrary() {
                 <BookOpen className="w-20 h-20 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-2xl font-bold text-gray-900 mb-2">No articles found</h3>
                 <p className="text-gray-600 mb-6">
-                  {searchQuery 
+                  {searchQuery
                     ? `No results for "${searchQuery}". Try different keywords.`
                     : 'No articles in this category yet. Check back soon!'}
                 </p>

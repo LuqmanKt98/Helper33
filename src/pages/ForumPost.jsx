@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,25 +46,43 @@ export default function ForumPost() {
   const urlParams = new URLSearchParams(window.location.search);
   const postId = urlParams.get('id');
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me().catch(() => null),
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: post, isLoading: postLoading } = useQuery({
     queryKey: ['forumPost', postId],
     queryFn: async () => {
-      const posts = await base44.entities.ForumPost.filter({ id: postId });
-      const foundPost = posts[0];
-      
-      if (foundPost) {
+      const { data, error } = await supabase
+        .from('posts')
+        .select('*')
+        .eq('id', postId)
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
         // Increment view count
-        await base44.entities.ForumPost.update(postId, {
-          view_count: (foundPost.view_count || 0) + 1
-        });
+        await supabase
+          .from('posts')
+          .update({ view_count: (data.view_count || 0) + 1 })
+          .eq('id', postId);
       }
-      
-      return foundPost;
+
+      return data;
     },
     enabled: !!postId,
   });
@@ -71,10 +90,14 @@ export default function ForumPost() {
   const { data: comments = [], isLoading: commentsLoading } = useQuery({
     queryKey: ['forumComments', postId],
     queryFn: async () => {
-      return await base44.entities.ForumComment.filter(
-        { post_id: postId },
-        '-created_date'
-      );
+      const { data, error } = await supabase
+        .from('comments')
+        .select('*')
+        .eq('post_id', postId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data || [];
     },
     enabled: !!postId,
   });
@@ -83,44 +106,66 @@ export default function ForumPost() {
   useEffect(() => {
     if (user && postId) {
       // Check bookmark
-      base44.entities.ForumBookmark.filter({ post_id: postId, created_by: user.email })
-        .then(bookmarks => setIsBookmarked(bookmarks.length > 0))
-        .catch(() => {});
+      // Assuming a community_engagements table or similar for likes/bookmarks
+      // For now, let's assume we store them in a way we can query
+      const checkEngagement = async () => {
+        const { data: likes } = await supabase
+          .from('post_likes')
+          .select('*')
+          .eq('post_id', postId)
+          .eq('user_id', user.id);
+        setHasLiked(likes && likes.length > 0);
 
-      // Check like
-      base44.entities.ForumLike.filter({ post_id: postId, created_by: user.email })
-        .then(likes => setHasLiked(likes.length > 0))
-        .catch(() => {});
+        // Similar for bookmarks
+        const { data: bookmarks } = await supabase
+          .from('post_bookmarks')
+          .select('*')
+          .eq('post_id', postId)
+          .eq('user_id', user.id);
+        setIsBookmarked(bookmarks && bookmarks.length > 0);
+      };
+
+      checkEngagement();
     }
   }, [user, postId]);
 
   const handleLike = async () => {
     if (!user) {
       toast.info('Please log in to like posts');
-      base44.auth.redirectToLogin(window.location.pathname);
+      navigate(createPageUrl('Login') + `?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
 
     try {
       if (hasLiked) {
         // Unlike
-        const likes = await base44.entities.ForumLike.filter({ post_id: postId, created_by: user.email });
-        if (likes[0]) {
-          await base44.entities.ForumLike.delete(likes[0].id);
-        }
-        await base44.entities.ForumPost.update(postId, {
-          like_count: Math.max(0, (post.like_count || 0) - 1)
-        });
+        const { error } = await supabase
+          .from('post_likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', user.id);
+
+        if (error) throw error;
+
+        await supabase
+          .from('posts')
+          .update({ like_count: Math.max(0, (post.like_count || 0) - 1) })
+          .eq('id', postId);
+
         setHasLiked(false);
       } else {
         // Like
-        await base44.entities.ForumLike.create({
-          post_id: postId,
-          user_name: user.full_name
-        });
-        await base44.entities.ForumPost.update(postId, {
-          like_count: (post.like_count || 0) + 1
-        });
+        const { error } = await supabase
+          .from('post_likes')
+          .insert({ post_id: postId, user_id: user.id });
+
+        if (error) throw error;
+
+        await supabase
+          .from('posts')
+          .update({ like_count: (post.like_count || 0) + 1 })
+          .eq('id', postId);
+
         setHasLiked(true);
       }
       queryClient.invalidateQueries(['forumPost', postId]);
@@ -133,26 +178,29 @@ export default function ForumPost() {
   const handleBookmark = async () => {
     if (!user) {
       toast.info('Please log in to bookmark posts');
-      base44.auth.redirectToLogin(window.location.pathname);
+      navigate(createPageUrl('Login') + `?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
 
     try {
       if (isBookmarked) {
         // Remove bookmark
-        const bookmarks = await base44.entities.ForumBookmark.filter({ post_id: postId, created_by: user.email });
-        if (bookmarks[0]) {
-          await base44.entities.ForumBookmark.delete(bookmarks[0].id);
-        }
+        const { error } = await supabase
+          .from('post_bookmarks')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', user.id);
+
+        if (error) throw error;
         setIsBookmarked(false);
         toast.success('Bookmark removed');
       } else {
         // Add bookmark
-        await base44.entities.ForumBookmark.create({
-          post_id: postId,
-          post_title: post.title,
-          category_name: post.category_id
-        });
+        const { error } = await supabase
+          .from('post_bookmarks')
+          .insert({ post_id: postId, user_id: user.id });
+
+        if (error) throw error;
         setIsBookmarked(true);
         toast.success('Post bookmarked!');
       }
@@ -167,7 +215,7 @@ export default function ForumPost() {
 
     if (!user) {
       toast.info('Please log in to comment');
-      base44.auth.redirectToLogin(window.location.pathname);
+      navigate(createPageUrl('Login') + `?redirect=${encodeURIComponent(window.location.pathname)}`);
       return;
     }
 
@@ -180,36 +228,42 @@ export default function ForumPost() {
 
     try {
       // AI Moderation for comment
-      const moderationResponse = await base44.integrations.Core.InvokeLLM({
-        prompt: `Check this comment for safety: "${commentContent}". Return safety score 0-1 and is_safe boolean.`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            safety_score: { type: "number" },
-            is_safe: { type: "boolean" }
-          }
+      const { data: moderationResponse, error: moderationError } = await supabase.functions.invoke('process-ai', {
+        body: {
+          action: 'moderate-comment',
+          content: commentContent.trim()
         }
       });
 
-      await base44.entities.ForumComment.create({
-        post_id: postId,
-        content: commentContent.trim(),
-        author_name: user.full_name,
-        author_avatar: user.avatar_url,
-        status: moderationResponse.is_safe ? 'approved' : 'pending',
-        ai_moderation_score: moderationResponse.safety_score
-      });
+      if (moderationError) throw moderationError;
+
+      const { error: commentError } = await supabase
+        .from('comments')
+        .insert({
+          post_id: postId,
+          content: commentContent.trim(),
+          author_name: user.full_name,
+          author_avatar_url: user.avatar_url,
+          status: moderationResponse.is_safe ? 'approved' : 'pending',
+          ai_moderation_score: moderationResponse.safety_score,
+          created_by: user.id
+        });
+
+      if (commentError) throw commentError;
 
       // Update post comment count and last activity
-      await base44.entities.ForumPost.update(postId, {
-        comment_count: (post.comment_count || 0) + 1,
-        last_activity_date: new Date().toISOString()
-      });
+      await supabase
+        .from('posts')
+        .update({
+          comment_count: (post.comment_count || 0) + 1,
+          last_activity_at: new Date().toISOString()
+        })
+        .eq('id', postId);
 
       setCommentContent('');
       queryClient.invalidateQueries(['forumComments', postId]);
       queryClient.invalidateQueries(['forumPost', postId]);
-      
+
       if (moderationResponse.is_safe) {
         toast.success('Comment posted!');
       } else {
@@ -254,7 +308,7 @@ export default function ForumPost() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 p-4 sm:p-6">
       <div className="max-w-4xl mx-auto space-y-6">
-        
+
         {/* Header */}
         <div className="flex items-center gap-3">
           <Button
@@ -442,7 +496,7 @@ export default function ForumPost() {
                             </span>
                           </div>
                           <p className="text-gray-700 text-sm">{comment.content}</p>
-                          
+
                           <div className="flex items-center gap-3 mt-3">
                             <Button variant="ghost" size="sm" className="h-8 text-xs">
                               <ThumbsUp className="w-3 h-3 mr-1" />

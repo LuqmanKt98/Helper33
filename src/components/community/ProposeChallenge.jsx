@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -57,31 +57,15 @@ export default function ProposeChallenge({ user, onClose }) {
     mutationFn: async (proposalData) => {
       // AI moderation check
       setAiCheckStatus('checking');
-      
-      const moderationResult = await base44.integrations.Core.InvokeLLM({
-        prompt: `Review this community challenge proposal for safety and appropriateness:
 
-Title: ${proposalData.title}
-Description: ${proposalData.description}
-Goal: ${proposalData.goal_description}
-
-Check for:
-1. Harmful or dangerous activities
-2. Inappropriate content
-3. Spam or promotional intent
-4. Unrealistic or potentially harmful goals
-5. Positive community value
-
-Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), and reason (string).`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            is_safe: { type: "boolean" },
-            severity: { type: "string" },
-            reason: { type: "string" }
-          }
+      const { data: moderationResult, error: aiError } = await supabase.functions.invoke('process-ai', {
+        body: {
+          action: 'moderate-challenge-proposal',
+          proposal: proposalData
         }
       });
+
+      if (aiError) throw aiError;
 
       setAiCheckStatus(moderationResult.severity);
 
@@ -91,13 +75,20 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
       }
 
       // Create proposal
-      return base44.entities.ChallengeProposal.create({
-        ...proposalData,
-        proposer_name: user.preferred_name || user.full_name,
-        proposer_email: user.email,
-        status: 'pending_review',
-        ai_moderation_result: moderationResult
-      });
+      const { data, error } = await supabase
+        .from('challenge_proposals')
+        .insert({
+          ...proposalData,
+          proposer_name: user.preferred_name || user.full_name,
+          proposer_id: user.id,
+          status: 'pending_review',
+          ai_moderation_result: moderationResult
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['challengeProposals']);
@@ -148,7 +139,7 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
             </Label>
             <Input
               value={formData.title}
-              onChange={(e) => setFormData({...formData, title: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               placeholder="30 Days of Gratitude"
               className="border-2 border-purple-200"
             />
@@ -161,7 +152,7 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
             </Label>
             <Textarea
               value={formData.description}
-              onChange={(e) => setFormData({...formData, description: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               placeholder="Write down 3 things you're grateful for every day for 30 days. Build a positive mindset and appreciate life's blessings!"
               className="min-h-24 border-2 border-purple-200"
             />
@@ -174,7 +165,7 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
             </Label>
             <Input
               value={formData.goal_description}
-              onChange={(e) => setFormData({...formData, goal_description: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, goal_description: e.target.value })}
               placeholder="Complete 30 days of gratitude journaling"
               className="border-2 border-purple-200"
             />
@@ -189,12 +180,11 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
               {popularIcons.map((icon) => (
                 <button
                   key={icon}
-                  onClick={() => setFormData({...formData, icon})}
-                  className={`text-3xl p-3 rounded-lg border-2 transition-all hover:scale-110 ${
-                    formData.icon === icon 
-                      ? 'border-purple-500 bg-purple-100 shadow-lg' 
+                  onClick={() => setFormData({ ...formData, icon })}
+                  className={`text-3xl p-3 rounded-lg border-2 transition-all hover:scale-110 ${formData.icon === icon
+                      ? 'border-purple-500 bg-purple-100 shadow-lg'
                       : 'border-gray-200 hover:border-purple-300'
-                  }`}
+                    }`}
                 >
                   {icon}
                 </button>
@@ -211,12 +201,11 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
               {colorThemes.map((theme) => (
                 <button
                   key={theme.id}
-                  onClick={() => setFormData({...formData, color_theme: theme.id})}
-                  className={`p-3 rounded-lg border-2 transition-all ${
-                    formData.color_theme === theme.id 
-                      ? 'border-purple-500 shadow-lg scale-105' 
+                  onClick={() => setFormData({ ...formData, color_theme: theme.id })}
+                  className={`p-3 rounded-lg border-2 transition-all ${formData.color_theme === theme.id
+                      ? 'border-purple-500 shadow-lg scale-105'
                       : 'border-gray-200 hover:border-purple-300'
-                  }`}
+                    }`}
                 >
                   <div className={`h-8 rounded bg-gradient-to-r ${theme.id} mb-1`} />
                   <p className="text-xs font-semibold text-gray-700">{theme.label}</p>
@@ -232,7 +221,7 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
               <Label className="text-sm font-semibold text-gray-700 mb-2 block">Category</Label>
               <select
                 value={formData.category}
-                onChange={(e) => setFormData({...formData, category: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                 className="w-full p-2 border-2 border-purple-200 rounded-lg"
               >
                 {categories.map((cat) => (
@@ -251,7 +240,7 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
               <Input
                 type="number"
                 value={formData.duration_days}
-                onChange={(e) => setFormData({...formData, duration_days: parseInt(e.target.value) || 30})}
+                onChange={(e) => setFormData({ ...formData, duration_days: parseInt(e.target.value) || 30 })}
                 min="1"
                 max="365"
                 className="border-2 border-purple-200"
@@ -266,7 +255,7 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
               <Input
                 type="number"
                 value={formData.goal_value}
-                onChange={(e) => setFormData({...formData, goal_value: parseInt(e.target.value) || 30})}
+                onChange={(e) => setFormData({ ...formData, goal_value: parseInt(e.target.value) || 30 })}
                 min="1"
                 className="border-2 border-purple-200"
               />
@@ -280,13 +269,12 @@ Return JSON with is_safe (boolean), severity ("safe" | "warning" | "blocked"), a
               {['beginner', 'intermediate', 'advanced'].map((level) => (
                 <Button
                   key={level}
-                  onClick={() => setFormData({...formData, difficulty_level: level})}
+                  onClick={() => setFormData({ ...formData, difficulty_level: level })}
                   variant={formData.difficulty_level === level ? 'default' : 'outline'}
-                  className={`capitalize ${
-                    formData.difficulty_level === level 
-                      ? 'bg-gradient-to-r from-purple-600 to-pink-600' 
+                  className={`capitalize ${formData.difficulty_level === level
+                      ? 'bg-gradient-to-r from-purple-600 to-pink-600'
                       : 'border-2 border-purple-200'
-                  }`}
+                    }`}
                 >
                   {level}
                 </Button>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -42,35 +42,16 @@ export default function CreatePostModal({ user, onClose }) {
 
   const moderateContent = async (text) => {
     setAiCheckStatus('checking');
-    
+
     try {
-      const response = await base44.integrations.Core.InvokeLLM({
-        prompt: `You are a content safety moderator for a wellness community platform. Analyze this post and determine if it's safe and appropriate. 
-
-Post content: "${text}"
-
-Check for:
-1. Crisis language or self-harm mentions (if found, flag as "crisis" - these need immediate intervention)
-2. Hate speech, bullying, or harassment
-3. Spam or promotional content
-4. Inappropriate or adult content
-5. Personal information sharing (phone, address, etc.)
-
-Return a JSON with:
-- is_safe: boolean
-- severity: "safe" | "warning" | "crisis" | "blocked"
-- reason: string (brief explanation)
-- suggested_resources: array of resource types if crisis detected (e.g., ["crisis_hotline", "therapist"])`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            is_safe: { type: "boolean" },
-            severity: { type: "string" },
-            reason: { type: "string" },
-            suggested_resources: { type: "array", items: { type: "string" } }
-          }
+      const { data: response, error } = await supabase.functions.invoke('process-ai', {
+        body: {
+          action: 'moderate-post',
+          content: text
         }
       });
+
+      if (error) throw error;
 
       setAiCheckStatus(response.severity);
       return response;
@@ -84,7 +65,7 @@ Return a JSON with:
   const createPostMutation = useMutation({
     mutationFn: async (postData) => {
       const moderationResult = await moderateContent(postData.content);
-      
+
       if (moderationResult.severity === 'crisis') {
         toast.error('Your post contains crisis language. Please reach out to Crisis Hub for immediate support.', {
           duration: 8000,
@@ -95,31 +76,39 @@ Return a JSON with:
         });
         throw new Error('Crisis content detected');
       }
-      
+
       if (moderationResult.severity === 'blocked') {
         toast.error(`Post cannot be published: ${moderationResult.reason}`);
         throw new Error('Content blocked by moderation');
       }
 
       const privacy = user?.community_privacy || { is_fully_anonymous: true };
-      
-      return base44.entities.ContentPost.create({
-        ...postData,
-        author_name: privacy.is_fully_anonymous 
-          ? `${user?.profile_emoji || '🎭'} Anonymous` 
-          : user?.preferred_name || user?.full_name,
-        author_avatar: privacy.is_fully_anonymous ? null : user?.avatar_url,
-        is_anonymous: privacy.is_fully_anonymous,
-        moderation_status: moderationResult.severity === 'warning' ? 'flagged' : 'approved',
-        moderation_notes: moderationResult.reason,
-        like_count: 0,
-        comment_count: 0,
-        share_count: 0
-      });
+
+      const { data, error } = await supabase
+        .from('posts')
+        .insert({
+          ...postData,
+          author_id: user.id,
+          author_name: privacy.is_fully_anonymous
+            ? `${user?.profile_emoji || '🎭'} Anonymous`
+            : user?.preferred_name || user?.full_name,
+          author_avatar_url: privacy.is_fully_anonymous ? null : user?.avatar_url,
+          is_anonymous: privacy.is_fully_anonymous,
+          moderation_status: moderationResult.severity === 'warning' ? 'flagged' : 'approved',
+          moderation_notes: moderationResult.reason,
+          like_count: 0,
+          comment_count: 0,
+          share_count: 0
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['contentPosts']);
-      queryClient.invalidateQueries(['anonymousPosts']);
+      queryClient.invalidateQueries({ queryKey: ['contentPosts'] });
+      queryClient.invalidateQueries({ queryKey: ['anonymousPosts'] });
       toast.success('🎉 Your post is live!');
       onClose();
     },
@@ -135,8 +124,21 @@ Return a JSON with:
     setIsUploading(true);
     try {
       const uploadPromises = files.map(async (file) => {
-        const response = await base44.integrations.Core.UploadFile({ file });
-        return response.file_url;
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Math.random()}.${fileExt}`;
+        const filePath = `${user.id}/${Date.now()}_${fileName}`;
+
+        const { data, error } = await supabase.storage
+          .from('community-posts')
+          .upload(filePath, file);
+
+        if (error) throw error;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('community-posts')
+          .getPublicUrl(filePath);
+
+        return publicUrl;
       });
 
       const urls = await Promise.all(uploadPromises);
@@ -242,11 +244,10 @@ Return a JSON with:
                   key={m.id}
                   onClick={() => setMood(mood === m.id ? '' : m.id)}
                   variant={mood === m.id ? 'default' : 'outline'}
-                  className={`${
-                    mood === m.id 
-                      ? `bg-gradient-to-r ${m.color} text-white border-0` 
-                      : 'border-2'
-                  }`}
+                  className={`${mood === m.id
+                    ? `bg-gradient-to-r ${m.color} text-white border-0`
+                    : 'border-2'
+                    }`}
                   size="sm"
                 >
                   {m.label}
@@ -325,7 +326,7 @@ Return a JSON with:
                 </div>
               </Button>
             </label>
-            
+
             {mediaUrls.length > 0 && (
               <div className="grid grid-cols-3 gap-2 mt-3">
                 {mediaUrls.map((url, idx) => (
@@ -354,13 +355,12 @@ Return a JSON with:
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className={`p-3 rounded-lg border-2 ${
-                  aiCheckStatus === 'warning' 
-                    ? 'bg-yellow-50 border-yellow-300' 
-                    : aiCheckStatus === 'checking'
+                className={`p-3 rounded-lg border-2 ${aiCheckStatus === 'warning'
+                  ? 'bg-yellow-50 border-yellow-300'
+                  : aiCheckStatus === 'checking'
                     ? 'bg-blue-50 border-blue-300'
                     : 'bg-red-50 border-red-300'
-                }`}
+                  }`}
               >
                 <div className="flex items-center gap-2">
                   {aiCheckStatus === 'checking' ? (
@@ -371,11 +371,11 @@ Return a JSON with:
                     <ShieldAlert className="w-5 h-5 text-red-600" />
                   )}
                   <p className="text-sm font-semibold">
-                    {aiCheckStatus === 'checking' 
-                      ? 'AI is reviewing your content...' 
+                    {aiCheckStatus === 'checking'
+                      ? 'AI is reviewing your content...'
                       : aiCheckStatus === 'warning'
-                      ? 'Content flagged for review'
-                      : 'Content requires attention'
+                        ? 'Content flagged for review'
+                        : 'Content requires attention'
                     }
                   </p>
                 </div>
@@ -414,7 +414,7 @@ Return a JSON with:
           {/* Privacy Notice */}
           <div className="text-xs text-gray-500 text-center p-3 bg-gray-50 rounded-lg">
             <p>
-              {user?.community_privacy?.is_fully_anonymous 
+              {user?.community_privacy?.is_fully_anonymous
                 ? '🎭 Posted as anonymous • Your identity is protected'
                 : '🌟 Posted with your profile • Visible to community'
               }

@@ -1,10 +1,11 @@
 
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/lib/AuthContext";
 import { useQuery } from '@tanstack/react-query';
 import { Card } from "@/components/ui/card";
 import {
-  Users, Calendar, ListChecks, Globe, Shield, Target, ShieldCheck, HandHeart, PartyPopper, BookOpenText, Heart, CheckSquare 
+  Users, Calendar, ListChecks, Globe, Shield, Target, ShieldCheck, HandHeart, PartyPopper, BookOpenText, Heart, CheckSquare
 } from "lucide-react";
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -23,8 +24,8 @@ import SMSComposer from "@/components/family/SMSComposer";
 import KidsProgress from "@/components/family/KidsProgress";
 import KidsJournalProgress from "@/components/family/KidsJournalProgress";
 import TeacherMentorView from "@/components/family/TeacherMentorView";
-import FamilyTodoList from "@/components/family/FamilyTodoList"; 
-import FamilyMoodTracker from "@/components/family/FamilyMoodTracker"; 
+import FamilyTodoList from "@/components/family/FamilyTodoList";
+import FamilyMoodTracker from "@/components/family/FamilyMoodTracker";
 
 // New imports for AI components
 import AIMoodInsights from '@/components/family/AIMoodInsights';
@@ -52,98 +53,201 @@ export default function Family() {
   const [callConfirmation, setCallConfirmation] = useState({ isOpen: false, member: null });
   const [isPlacingCall, setIsPlacingCall] = useState(false);
 
+  const { user: authUser } = useAuth();
+  const queryClient = useQueryClient();
+
   // Load user data
   const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me(),
-    retry: false
+    queryKey: ['currentUser', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   // Lazy load data based on active tab
   const { data: members = [], refetch: refetchMembers } = useQuery({
-    queryKey: ['familyMembers'],
-    queryFn: () => base44.entities.FamilyMember.list('-name'),
-    enabled: true, // Always load members as they're needed for permissions
+    queryKey: ['familyMembers', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_members')
+        .select('*, profiles:user_id(*)')
+        .order('role');
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser,
     initialData: []
   });
 
   const { data: profile, refetch: refetchProfile } = useQuery({
-    queryKey: ['familyProfile'],
+    queryKey: ['familyProfile', authUser?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.FamilyProfile.list();
-      return profiles[0] || null;
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('families')
+        .select('*')
+        .limit(1)
+        .single();
+      if (error) throw error;
+      return data;
     },
-    enabled: activeTab === 'connect',
+    enabled: activeTab === 'connect' && !!authUser,
     initialData: null
   });
 
   const { data: connections = [], refetch: refetchConnections } = useQuery({
-    queryKey: ['familyConnections'],
-    queryFn: () => base44.entities.FamilyConnection.list(),
-    enabled: activeTab === 'connect',
+    queryKey: ['familyConnections', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_connections')
+        .select('*');
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'connect' && !!authUser,
     initialData: []
   });
 
   const { data: playdates = [], refetch: refetchPlaydates } = useQuery({
-    queryKey: ['playDateInvitations'],
-    queryFn: () => base44.entities.PlayDateInvitation.list(),
-    enabled: activeTab === 'playdates',
+    queryKey: ['playDateInvitations', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('play_date_invitations')
+        .select('*');
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'playdates' && !!authUser,
     initialData: []
   });
 
   const { data: updates = [], refetch: refetchUpdates } = useQuery({
-    queryKey: ['familyUpdates'],
-    queryFn: () => base44.entities.FamilyUpdate.list('-created_date'),
-    enabled: activeTab === 'community',
+    queryKey: ['familyUpdates', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_updates')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'community' && !!authUser,
     initialData: []
   });
 
   const { data: chores = [], refetch: refetchChores } = useQuery({
-    queryKey: ['familyChores'],
-    queryFn: () => base44.entities.Chore.list('-created_date'),
-    enabled: activeTab === 'chores',
+    queryKey: ['familyChores', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('chores')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'chores' && !!authUser,
     initialData: []
   });
 
   const { data: events = [], refetch: refetchEvents } = useQuery({
-    queryKey: ['familyEvents'],
-    queryFn: () => base44.entities.FamilyEvent.list('-start_date'),
-    enabled: activeTab === 'schedule',
+    queryKey: ['familyEvents', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_events')
+        .select('*')
+        .order('start_date', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'schedule' && !!authUser,
     initialData: []
   });
 
   const { data: documents = [], refetch: refetchDocuments } = useQuery({
-    queryKey: ['familyDocuments'],
-    queryFn: () => base44.entities.FamilyDocument.list('-created_date'),
-    enabled: activeTab === 'documents',
+    queryKey: ['familyDocuments', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_documents')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'documents' && !!authUser,
     initialData: []
   });
 
   const { data: budgets = [], refetch: refetchBudgets } = useQuery({
-    queryKey: ['familyBudgets'],
-    queryFn: () => base44.entities.FamilyBudget.list(),
-    enabled: activeTab === 'expenses',
+    queryKey: ['familyBudgets', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_budgets')
+        .select('*');
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'expenses' && !!authUser,
     initialData: []
   });
 
   const { data: expenses = [], refetch: refetchExpenses } = useQuery({
-    queryKey: ['familyExpenses'],
-    queryFn: () => base44.entities.FamilyExpense.list('-date'),
-    enabled: activeTab === 'expenses',
+    queryKey: ['familyExpenses', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_expenses')
+        .select('*')
+        .order('date', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'expenses' && !!authUser,
     initialData: []
   });
 
   const { data: todos = [], refetch: refetchTodos } = useQuery({
-    queryKey: ['familyTodos'],
-    queryFn: () => base44.entities.FamilyTodo.list('-created_date'),
-    enabled: activeTab === 'todos',
+    queryKey: ['familyTodos', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_todos')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'todos' && !!authUser,
     initialData: []
   });
 
   const { data: moodEntries = [], refetch: refetchMoods } = useQuery({
-    queryKey: ['familyMoodEntries'],
-    queryFn: () => base44.entities.FamilyMoodEntry.list('-created_date'),
-    enabled: activeTab === 'moods',
+    queryKey: ['familyMoodEntries', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('family_mood_entries')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: activeTab === 'moods' && !!authUser,
     initialData: []
   });
 
@@ -190,168 +294,172 @@ export default function Family() {
         break;
     }
   };
-  
+
   const handleInitiateVideoCall = async (member) => {
     if (!member.user_id) {
-        toast.error(`${member.name} has not joined the app yet and cannot be called.`);
-        return;
+      toast.error(`${member.name} has not joined the app yet and cannot be called.`);
+      return;
     }
     toast.info(`Starting video call with ${member.name}...`);
     try {
-        const response = await base44.functions.invoke('createDailyRoom');
-        if (response.data?.url) {
-            window.location.href = createPageUrl(`VideoCall?url=${encodeURIComponent(response.data.url)}`);
-        } else {
-            throw new Error(response.data?.error || "Failed to create video room.");
-        }
+      const { data, error } = await supabase.functions.invoke('createDailyRoom');
+      if (data?.url) {
+        window.location.href = createPageUrl(`VideoCall?url=${encodeURIComponent(data.url)}`);
+      } else {
+        throw new Error(data?.error || error?.message || "Failed to create video room.");
+      }
     } catch (error) {
-        toast.error(`Failed to start video call. ${error.message}`);
-        console.error("Error initiating video call:", error);
+      toast.error(`Failed to start video call. ${error.message}`);
+      console.error("Error initiating video call:", error);
     }
   };
 
   const handleInitiatePhoneCall = (member) => {
     if (!member.phone_number) {
-        toast.error(`${member.name} does not have a phone number saved.`);
-        return;
+      toast.error(`${member.name} does not have a phone number saved.`);
+      return;
     }
     if (!user?.phone_number) {
-        toast.info("Please add your phone number to your profile in the 'Account' page to use this feature.");
-        return;
+      toast.info("Please add your phone number to your profile in the 'Account' page to use this feature.");
+      return;
     }
     setCallConfirmation({ isOpen: true, member });
   };
-  
+
   const confirmPhoneCall = async () => {
     if (!callConfirmation.member) return;
-    
+
     setIsPlacingCall(true);
     try {
-        const response = await base44.functions.invoke('makePhoneCall', {
-            to: callConfirmation.member.phone_number,
-        });
+      const { data, error } = await supabase.functions.invoke('makePhoneCall', {
+        body: { to: callConfirmation.member.phone_number },
+      });
 
-        if (response.data.success) {
-            toast.success(response.data.message || "Call initiated! Your phone will ring first.");
-        } else {
-            throw new Error(response.data.error || "Failed to place call.");
-        }
+      if (data?.success) {
+        toast.success(data.message || "Call initiated! Your phone will ring first.");
+      } else {
+        throw new Error(data?.error || error?.message || "Failed to place call.");
+      }
 
     } catch (error) {
-        toast.error(error.message);
-        console.error("Error making phone call:", error);
+      toast.error(error.message);
+      console.error("Error making phone call:", error);
     } finally {
-        setIsPlacingCall(false);
-        setCallConfirmation({ isOpen: false, member: null });
+      setIsPlacingCall(false);
+      setCallConfirmation({ isOpen: false, member: null });
     }
   };
 
   const handleInviteMember = (member) => {
-      const appUrl = window.location.origin;
-      const inviteMessage = `You've been invited to join our family on Helper33! Click here to join: ${appUrl}`;
-      setSmsConfig({ recipient: member, prefilledMessage: inviteMessage });
-      setIsSmsOpen(true);
+    const appUrl = window.location.origin;
+    const inviteMessage = `You've been invited to join our family on Helper33! Click here to join: ${appUrl}`;
+    setSmsConfig({ recipient: member, prefilledMessage: inviteMessage });
+    setIsSmsOpen(true);
   };
-  
+
   const onSmsSent = async (member) => {
     try {
-        await base44.entities.FamilyMember.update(member.id, {
-            invitation_status: 'invited',
-            invitation_sent_date: new Date().toISOString()
-        });
-        toast.success(`Invitation sent to ${member.name}`);
-        refetchMembers();
+      await supabase
+        .from('family_members')
+        .update({
+          invitation_status: 'invited',
+          invitation_sent_date: new Date().toISOString()
+        })
+        .eq('id', member.id);
+      toast.success(`Invitation sent to ${member.name}`);
+      refetchMembers();
     } catch (error) {
-        toast.error("Failed to update invitation status.");
+      toast.error("Failed to update invitation status.");
     }
     setIsSmsOpen(false);
   };
 
   // VIEWS object is adapted for Tabs component usage, renamed to VIEWS_CONFIG
   const VIEWS_CONFIG = {
-      dashboard: {
-          label: 'Hub',
-          icon: Users,
-          component: <FamilyDashboard 
-              members={members} 
-              currentUser={user}
-              onInitiateVideoCall={handleInitiateVideoCall}
-              onInitiatePhoneCall={handleInitiatePhoneCall}
-              onOpenChat={() => setIsChatOpen(true)}
-              onInviteMember={handleInviteMember}
-              onNavigate={setActiveTab}
-              onMemberUpdate={refetchMembers}
+    dashboard: {
+      label: 'Hub',
+      icon: Users,
+      component: <FamilyDashboard
+        members={members}
+        currentUser={user}
+        onInitiateVideoCall={handleInitiateVideoCall}
+        onInitiatePhoneCall={handleInitiatePhoneCall}
+        onOpenChat={() => setIsChatOpen(true)}
+        onInviteMember={handleInviteMember}
+        onNavigate={setActiveTab}
+        onMemberUpdate={refetchMembers}
+      />
+    },
+    collaborative: {
+      label: 'Tasks',
+      icon: ListChecks,
+      component: <CollaborativeTaskBoard />
+    },
+    journal: {
+      label: 'Journal',
+      icon: BookOpenText,
+      component: <FamilyJournalHub />
+    },
+    memories: {
+      label: 'Memories',
+      icon: Heart,
+      component: <SharedMemoryAlbum />
+    },
+    todos: {
+      label: 'Quick List',
+      icon: CheckSquare,
+      component: <FamilyTodoList todos={todos} familyMembers={members} onUpdate={refetchTodos} />
+    },
+    moods: {
+      label: 'Moods',
+      icon: Heart,
+      component: (
+        <div className="space-y-6">
+          <FamilyMoodTracker moodEntries={moodEntries} familyMembers={members} onUpdate={refetchMoods} />
+          <AIMoodInsights familyMembers={members} />
+        </div>
+      )
+    },
+    schedule: { label: 'Schedule', icon: Calendar, component: <FamilySchedule events={events} onUpdate={refetchEvents} familyMembers={members} /> },
+    chores: {
+      label: 'Chores',
+      icon: ListChecks,
+      component: (
+        <div className="space-y-6">
+          <AIChoreAssistant
+            chores={chores}
+            familyMembers={members}
+            onApplySuggestions={refetchChores}
           />
-      },
-      collaborative: {
-          label: 'Tasks',
-          icon: ListChecks,
-          component: <CollaborativeTaskBoard />
-      },
-      journal: {
-          label: 'Journal',
-          icon: BookOpenText,
-          component: <FamilyJournalHub />
-      },
-      memories: {
-          label: 'Memories',
-          icon: Heart,
-          component: <SharedMemoryAlbum />
-      },
-      todos: { 
-          label: 'Quick List', 
-          icon: CheckSquare, 
-          component: <FamilyTodoList todos={todos} familyMembers={members} onUpdate={refetchTodos} />
-      },
-      moods: { 
-          label: 'Moods', 
-          icon: Heart, 
-          component: (
-            <div className="space-y-6">
-              <FamilyMoodTracker moodEntries={moodEntries} familyMembers={members} onUpdate={refetchMoods} />
-              <AIMoodInsights familyMembers={members} />
-            </div>
-          )
-      },
-      schedule: { label: 'Schedule', icon: Calendar, component: <FamilySchedule events={events} onUpdate={refetchEvents} familyMembers={members} /> },
-      chores: { 
-        label: 'Chores', 
-        icon: ListChecks, 
-        component: (
-          <div className="space-y-6">
-            <AIChoreAssistant 
-              chores={chores} 
-              familyMembers={members}
-              onApplySuggestions={refetchChores}
-            />
-            <ChoreScheduler chores={chores} familyMembers={members} onChoreUpdate={refetchChores} />
-          </div>
-        )
-      },
-      expenses: { label: 'Finances', icon: Shield, component: <ExpenseTracker budgets={budgets} expenses={expenses} onUpdate={() => { refetchBudgets(); refetchExpenses(); }} /> },
-      documents: { label: 'Docs', icon: BookOpenText, component: <DocumentHub documents={documents} onDocumentUpdate={refetchDocuments} /> },
-      connect: { label: 'Discovery', icon: Globe, component: <FamilyDiscovery currentUser={user} familyProfile={profile} onProfileUpdate={refetchProfile} /> },
-      playdates: { 
-        label: 'Activities', 
-        icon: PartyPopper, 
-        component: (
-          <div className="space-y-6">
-            <AIActivitySuggestions familyMembers={members} />
-            <PlayDateManager invitations={playdates} onUpdate={refetchPlaydates} />
-          </div>
-        )
-      },
-      community: { label: 'Community', icon: HandHeart, component: <CommunityFeed updates={updates} onUpdate={refetchUpdates} /> },
-      access: { label: 'Access', icon: ShieldCheck, component: <FamilyAccessManager members={members} onMemberUpdate={refetchMembers} /> },
-      kids: { label: 'Kids', icon: Target,
-          component: ( 
-            <div className="space-y-6">
-                <KidsProgress familyMembers={members} />
-                <KidsJournalProgress familyMembers={members} />
-                <TeacherMentorView familyMembers={members} />
-            </div>
-          )
-      }
+          <ChoreScheduler chores={chores} familyMembers={members} onChoreUpdate={refetchChores} />
+        </div>
+      )
+    },
+    expenses: { label: 'Finances', icon: Shield, component: <ExpenseTracker budgets={budgets} expenses={expenses} onUpdate={() => { refetchBudgets(); refetchExpenses(); }} /> },
+    documents: { label: 'Docs', icon: BookOpenText, component: <DocumentHub documents={documents} onDocumentUpdate={refetchDocuments} /> },
+    connect: { label: 'Discovery', icon: Globe, component: <FamilyDiscovery currentUser={user} familyProfile={profile} onProfileUpdate={refetchProfile} /> },
+    playdates: {
+      label: 'Activities',
+      icon: PartyPopper,
+      component: (
+        <div className="space-y-6">
+          <AIActivitySuggestions familyMembers={members} />
+          <PlayDateManager invitations={playdates} onUpdate={refetchPlaydates} />
+        </div>
+      )
+    },
+    community: { label: 'Community', icon: HandHeart, component: <CommunityFeed updates={updates} onUpdate={refetchUpdates} /> },
+    access: { label: 'Access', icon: ShieldCheck, component: <FamilyAccessManager members={members} onMemberUpdate={refetchMembers} /> },
+    kids: {
+      label: 'Kids', icon: Target,
+      component: (
+        <div className="space-y-6">
+          <KidsProgress familyMembers={members} />
+          <KidsJournalProgress familyMembers={members} />
+          <TeacherMentorView familyMembers={members} />
+        </div>
+      )
+    }
   };
 
   const seo = getSEOForPage('Family');
@@ -365,7 +473,7 @@ export default function Family() {
         url="https://www.helper33.com/Family"
         structuredData={seo.structuredData}
       />
-      
+
       <div className="min-h-screen bg-gradient-to-br from-rose-50 via-pink-50 to-purple-50 p-4 sm:p-6 pb-24">
         <div className="max-w-7xl mx-auto space-y-6 pb-12">
           {/* Main Title/Branding */}
@@ -389,9 +497,9 @@ export default function Family() {
               <div className="mb-8 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
                 <TabsList className="inline-flex w-max min-w-full bg-gradient-to-r from-purple-50 to-pink-50 p-2 rounded-lg gap-1 sm:gap-2">
                   {Object.entries(VIEWS_CONFIG).map(([key, { label, icon: Icon }]) => (
-                    <TabsTrigger 
-                      key={key} 
-                      value={key} 
+                    <TabsTrigger
+                      key={key}
+                      value={key}
                       className="flex flex-col items-center justify-center gap-1 px-3 py-2.5 data-[state=active]:bg-white data-[state=active]:shadow-md rounded-md min-w-[70px] sm:min-w-[80px]"
                     >
                       {Icon && <Icon className="w-4 h-4 flex-shrink-0" />}
@@ -400,7 +508,7 @@ export default function Family() {
                   ))}
                 </TabsList>
               </div>
-              
+
               {Object.entries(VIEWS_CONFIG).map(([key, { component }]) => (
                 <TabsContent key={key} value={key} className="mt-0">
                   {component}
@@ -408,7 +516,7 @@ export default function Family() {
               ))}
             </Tabs>
           </Card>
-          
+
           {/* Family Chat Overlay */}
           <AnimatePresence>
             {isChatOpen && user && (
@@ -422,20 +530,20 @@ export default function Family() {
               </motion.div>
             )}
           </AnimatePresence>
-          
+
           {/* SMS Composer */}
           {isSmsOpen && (
-            <SMSComposer 
-              member={smsConfig.recipient} 
-              isOpen={isSmsOpen} 
-              onClose={() => setIsSmsOpen(false)} 
+            <SMSComposer
+              member={smsConfig.recipient}
+              isOpen={isSmsOpen}
+              onClose={() => setIsSmsOpen(false)}
               prefilledMessage={smsConfig.prefilledMessage}
               onSmsSent={() => onSmsSent(smsConfig.recipient)}
             />
           )}
-          
+
           {/* Phone Call Confirmation Dialog */}
-          <AlertDialog open={callConfirmation.isOpen} onOpenChange={(open) => !open && setCallConfirmation({isOpen: false, member: null})}>
+          <AlertDialog open={callConfirmation.isOpen} onOpenChange={(open) => !open && setCallConfirmation({ isOpen: false, member: null })}>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Call {callConfirmation.member?.name}?</AlertDialogTitle>

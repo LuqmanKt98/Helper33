@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,53 +29,46 @@ export default function InviteFriends({ user }) {
   const sendInviteMutation = useMutation({
     mutationFn: async ({ inviteeEmail, inviteeName, personalMessage }) => {
       // Create invite record
-      const invite = await base44.entities.CommunityInvite.create({
-        inviter_email: user.email,
-        inviter_name: user.preferred_name || user.full_name,
-        invitee_email: inviteeEmail,
-        invitee_name: inviteeName,
-        personal_message: personalMessage,
-        invite_type: 'general',
-        sent_at: new Date().toISOString(),
-        email_sent: false
-      });
+      const { data: invite, error: inviteError } = await supabase
+        .from('community_invites')
+        .insert({
+          inviter_email: user.email,
+          inviter_name: user.preferred_name || user.full_name,
+          invitee_email: inviteeEmail,
+          invitee_name: inviteeName,
+          personal_message: personalMessage,
+          invite_type: 'general',
+          sent_at: new Date().toISOString(),
+          email_sent: false
+        })
+        .select()
+        .single();
 
-      // Send email notification
+      if (inviteError) throw inviteError;
+
+      // Send email notification via edge function
       try {
-        await base44.integrations.Core.SendEmail({
-          to: inviteeEmail,
-          subject: `${user.preferred_name || user.full_name} invited you to Helper33! 💜`,
-          body: `Hi ${inviteeName || 'there'}!
-
-${user.preferred_name || user.full_name} has invited you to join Helper33 - an AI-powered wellness and support community.
-
-${personalMessage ? `Personal message from ${user.preferred_name || user.full_name}:\n"${personalMessage}"\n\n` : ''}
-
-Helper33 offers:
-🧠 AI Wellness Coaching & Mental Health Support
-👨‍👩‍👧‍👦 Family Hub & Task Management
-📚 Student AI Tutoring & Homework Help
-🎨 Kids Creative Studio (COPPA-compliant)
-💼 Business AI Tools & Social Media Manager
-🍳 Meal Planning & Recipe Generator
-🌟 And 33+ more AI tools!
-
-Join the community today:
-${inviteLink}
-
-Looking forward to seeing you there!
-
----
-Helper33 Team
-Making AI helpful for everyday life 💜`
+        const { error: emailError } = await supabase.functions.invoke('process-ai', {
+          body: {
+            action: 'send-invite-email',
+            to: inviteeEmail,
+            subject: `${user.preferred_name || user.full_name} invited you to Helper33! 💜`,
+            inviteeName,
+            inviterName: user.preferred_name || user.full_name,
+            personalMessage,
+            inviteLink
+          }
         });
 
-        // Update invite to mark email sent
-        await base44.entities.CommunityInvite.update(invite.id, {
-          email_sent: true
-        });
-      } catch (emailError) {
-        console.error('Email send failed:', emailError);
+        if (!emailError) {
+          // Update invite to mark email sent
+          await supabase
+            .from('community_invites')
+            .update({ email_sent: true })
+            .eq('id', invite.id);
+        }
+      } catch (emailErr) {
+        console.error('Email send failed:', emailErr);
       }
 
       return invite;

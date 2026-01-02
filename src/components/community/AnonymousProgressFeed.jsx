@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
@@ -20,58 +21,84 @@ export default function AnonymousProgressFeed({ onCreatePost }) {
   const [filterMood, setFilterMood] = useState('all');
   const queryClient = useQueryClient();
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['currentUser', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: posts = [], isLoading } = useQuery({
     queryKey: ['contentPosts', sortBy, filterMood],
     queryFn: async () => {
-      let allPosts = await base44.entities.ContentPost.list('-created_date');
-      
+      let query = supabase.from('posts').select('*');
+
       if (filterMood !== 'all') {
-        allPosts = allPosts.filter(p => p.mood === filterMood);
+        query = query.eq('mood', filterMood);
       }
 
-      if (sortBy === 'popular') {
-        allPosts.sort((a, b) => 
-          ((b.like_count || 0) + (b.comment_count || 0)) - 
-          ((a.like_count || 0) + (a.comment_count || 0))
-        );
+      if (sortBy === 'recent') {
+        query = query.order('created_at', { ascending: false });
+      } else {
+        // Simple popularity heuristic
+        query = query.order('like_count', { ascending: false });
       }
 
-      return allPosts;
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
     },
     enabled: !!user
   });
 
   const likeMutation = useMutation({
     mutationFn: async (post) => {
-      const existingLikes = await base44.entities.PostLike.filter({
-        post_id: post.id,
-        created_by: user.email
-      });
+      const { data: existingLikes } = await supabase
+        .from('post_likes')
+        .select('*')
+        .eq('post_id', post.id)
+        .eq('user_id', user.id);
 
-      if (existingLikes.length > 0) {
-        await base44.entities.PostLike.delete(existingLikes[0].id);
-        await base44.entities.ContentPost.update(post.id, {
-          like_count: Math.max(0, (post.like_count || 0) - 1)
-        });
+      if (existingLikes && existingLikes.length > 0) {
+        await supabase
+          .from('post_likes')
+          .delete()
+          .eq('id', existingLikes[0].id);
+
+        await supabase
+          .from('posts')
+          .update({
+            like_count: Math.max(0, (post.like_count || 0) - 1)
+          })
+          .eq('id', post.id);
       } else {
-        await base44.entities.PostLike.create({
-          post_id: post.id,
-          liker_name: user?.community_privacy?.is_fully_anonymous 
-            ? 'Anonymous' 
-            : user?.preferred_name || user?.full_name
-        });
-        await base44.entities.ContentPost.update(post.id, {
-          like_count: (post.like_count || 0) + 1
-        });
+        await supabase
+          .from('post_likes')
+          .insert({
+            post_id: post.id,
+            user_id: user.id
+          });
+
+        await supabase
+          .from('posts')
+          .update({
+            like_count: (post.like_count || 0) + 1
+          })
+          .eq('id', post.id);
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['contentPosts']);
+      queryClient.invalidateQueries({ queryKey: ['contentPosts'] });
     }
   });
 
@@ -98,18 +125,18 @@ export default function AnonymousProgressFeed({ onCreatePost }) {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <Card 
+        <Card
           className="border-2 border-purple-300 bg-gradient-to-r from-purple-50 to-pink-50 cursor-pointer hover:shadow-xl transition-all"
           onClick={onCreatePost}
         >
           <CardContent className="p-6">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-2xl shadow-lg">
-                {user?.community_privacy?.is_fully_anonymous 
-                  ? user?.profile_emoji || '🎭'
-                  : user?.avatar_url 
+                {user?.is_fully_anonymous
+                  ? user?.display_emoji || '🎭'
+                  : user?.avatar_url
                     ? <img src={user.avatar_url} className="w-full h-full rounded-full object-cover" alt="" />
-                    : user?.profile_emoji || '😊'
+                    : user?.display_emoji || '😊'
                 }
               </div>
               <div className="flex-1">
@@ -159,11 +186,10 @@ export default function AnonymousProgressFeed({ onCreatePost }) {
                   onClick={() => setFilterMood(m.id)}
                   size="sm"
                   variant={filterMood === m.id ? 'default' : 'outline'}
-                  className={`text-xs ${
-                    filterMood === m.id 
-                      ? `bg-gradient-to-r ${m.color} text-white border-0` 
-                      : ''
-                  }`}
+                  className={`text-xs ${filterMood === m.id
+                    ? `bg-gradient-to-r ${m.color} text-white border-0`
+                    : ''
+                    }`}
                 >
                   {m.label}
                 </Button>
@@ -198,8 +224,8 @@ export default function AnonymousProgressFeed({ onCreatePost }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.05 }}
             >
-              <PostCard 
-                post={post} 
+              <PostCard
+                post={post}
                 user={user}
                 onLike={() => likeMutation.mutate(post)}
               />

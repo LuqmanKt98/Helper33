@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,19 +30,47 @@ export default function SupportCircles() {
   const [selectedCircle, setSelectedCircle] = useState(null);
   const [activeView, setActiveView] = useState('my-circles'); // New state for tabs
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['currentUser', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: circles = [] } = useQuery({
     queryKey: ['supportCircles'],
-    queryFn: () => base44.entities.SupportCircle.list('-created_date')
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('support_circles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
   });
 
   const { data: myMemberships = [] } = useQuery({
-    queryKey: ['myCircleMemberships'],
-    queryFn: () => base44.entities.CircleMembership.list()
+    queryKey: ['myCircleMemberships', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('circle_memberships')
+        .select('*')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user
   });
 
   const myCircleIds = myMemberships?.map(m => m.circle_id) || [];
@@ -196,27 +225,48 @@ function CircleView({ circle, membership, onBack }) {
 
   const { data: posts = [] } = useQuery({
     queryKey: ['circlePosts', circle.id],
-    queryFn: () => base44.entities.CirclePost.filter({ circle_id: circle.id }, '-created_date')
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('circle_posts')
+        .select('*')
+        .eq('circle_id', circle.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
   });
 
   const joinMutation = useMutation({
     mutationFn: async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error('Not authenticated');
+
       const displayName = anonymousName.trim() || `Member${Math.floor(Math.random() * 1000)}`;
 
-      await base44.entities.CircleMembership.create({
-        circle_id: circle.id,
-        display_name: displayName,
-        is_anonymous: true,
-        joined_date: new Date().toISOString().split('T')[0]
-      });
+      const { error: joinError } = await supabase
+        .from('circle_memberships')
+        .insert({
+          circle_id: circle.id,
+          user_id: authUser.id,
+          display_name: displayName,
+          is_anonymous: true,
+          status: 'active'
+        });
 
-      await base44.entities.SupportCircle.update(circle.id, {
-        member_count: (circle.member_count || 0) + 1
-      });
+      if (joinError) throw joinError;
+
+      const { error: updateError } = await supabase
+        .from('support_circles')
+        .update({
+          member_count: (circle.member_count || 0) + 1
+        })
+        .eq('id', circle.id);
+
+      if (updateError) throw updateError;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['myCircleMemberships']);
-      queryClient.invalidateQueries(['supportCircles']);
+      queryClient.invalidateQueries({ queryKey: ['myCircleMemberships'] });
+      queryClient.invalidateQueries({ queryKey: ['supportCircles'] });
       toast.success('Welcome to the circle! 💜');
       setShowJoinForm(false);
     }
@@ -224,17 +274,24 @@ function CircleView({ circle, membership, onBack }) {
 
   const postMutation = useMutation({
     mutationFn: async () => {
-      await base44.entities.CirclePost.create({
-        circle_id: circle.id,
-        author_display_name: membership.display_name,
-        is_anonymous: membership.is_anonymous,
-        title: newPostTitle,
-        content: newPostContent,
-        post_type: 'general'
-      });
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error('Not authenticated');
+
+      const { error } = await supabase
+        .from('circle_posts')
+        .insert({
+          circle_id: circle.id,
+          user_id: authUser.id,
+          author_display_name: membership.display_name,
+          is_anonymous: membership.is_anonymous,
+          title: newPostTitle,
+          content: newPostContent,
+          post_type: 'general'
+        });
+      if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['circlePosts', circle.id]); // Invalidate specific circle's posts
+      queryClient.invalidateQueries({ queryKey: ['circlePosts', circle.id] }); // Invalidate specific circle's posts
       setNewPostContent('');
       setNewPostTitle('');
       toast.success('Post shared! 💬');
@@ -254,7 +311,7 @@ function CircleView({ circle, membership, onBack }) {
             <div>
               <h1 className="text-3xl font-bold mb-2">{circle.name}</h1>
               <p className="text-purple-100 mb-4">{circle.description}</p>
-              
+
               <div className="flex items-center gap-4 text-sm">
                 <div className="flex items-center gap-1">
                   <Users className="w-4 h-4" />
@@ -298,7 +355,7 @@ function CircleView({ circle, membership, onBack }) {
             <div className="flex gap-3">
               <Button
                 onClick={() => joinMutation.mutate()}
-                disabled={joinMutation.isLoading}
+                disabled={joinMutation.isPending}
                 className="flex-1 bg-purple-600"
               >
                 Join Circle
@@ -330,7 +387,7 @@ function CircleView({ circle, membership, onBack }) {
             />
             <Button
               onClick={() => postMutation.mutate()}
-              disabled={!newPostContent.trim() || postMutation.isLoading}
+              disabled={!newPostContent.trim() || postMutation.isPending}
               className="w-full bg-gradient-to-r from-purple-600 to-pink-600"
             >
               <Send className="w-4 h-4 mr-2" />
@@ -366,7 +423,15 @@ function CirclePostCard({ post, index }) {
 
   const { data: comments = [] } = useQuery({
     queryKey: ['circleComments', post.id],
-    queryFn: () => base44.entities.CircleComment.filter({ post_id: post.id }),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('circle_comments')
+        .select('*')
+        .eq('post_id', post.id)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
     enabled: showComments
   });
 
@@ -387,7 +452,7 @@ function CirclePostCard({ post, index }) {
             <div className="flex-1">
               <p className="font-semibold text-gray-900">{post.author_display_name}</p>
               <p className="text-xs text-gray-500">
-                {format(new Date(post.created_date), 'MMM d, h:mm a')}
+                {format(new Date(post.created_at), 'MMM d, h:mm a')}
               </p>
             </div>
           </div>

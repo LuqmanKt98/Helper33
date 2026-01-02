@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { createPageUrl } from "@/utils";
-import { base44 } from "@/api/base44Client";
+import { createPageUrl } from "@/utils/index";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/lib/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
@@ -70,8 +71,8 @@ const SUBSCRIPTION_TIERS = {
     name: 'Free',
     features: new Set([
       'Home', 'Dashboard', 'About', 'Blog', 'Account', 'Profile', 'Security',
-      'IntegrationsHub', 'Messages', 'Notifications', 'CrisisHub', 
-      'GriefCoach', 'Community', 'CommunityHub', 'SocialFeed', 'Events', 
+      'IntegrationsHub', 'Messages', 'Notifications', 'CrisisHub',
+      'GriefCoach', 'Community', 'CommunityHub', 'SocialFeed', 'Events',
       'Challenges', 'HeartfulHolidays', 'FeedbackSurvey', 'SupportUs',
       'PrivacyPolicy', 'TermsOfService', 'LegalDisclaimer', 'ExportData',
       'CommunityForum', 'Discover'
@@ -81,7 +82,7 @@ const SUBSCRIPTION_TIERS = {
     name: 'Basic',
     color: 'from-blue-500 to-cyan-500',
     features: new Set([
-      'LifeCoach', 'MindfulnessHub', 'Organizer', 'JournalStudio', 
+      'LifeCoach', 'MindfulnessHub', 'Organizer', 'JournalStudio',
       'VisionBoard', 'MemoryVault', 'PlannersHub', 'Year2026Hub',
       'GentleFlowPlanner', 'ScheduleTemplates', 'LifeTemplates',
       'HeartShiftJournal', 'GratitudeJournal', 'JournalHistory',
@@ -291,12 +292,22 @@ export default function Dashboard() {
   const [showCurateModal, setShowCurateModal] = useState(false);
   const [tempCuratedTools, setTempCuratedTools] = useState([]);
   const [curateSearchQuery, setCurateSearchQuery] = useState('');
+  const { user: authUser } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: user, isLoading: userLoading } = useQuery({
-    queryKey: ["currentUser"],
-    queryFn: () => base44.auth.me(),
-    retry: false
+    queryKey: ["currentUser", authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { t, isRTL } = useTranslation(user);
@@ -310,15 +321,24 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!user) return null;
 
-      const [tasks, wellnessEntries, journalEntries, habits, challenges, familyEvents, kidsProgress, completedHabits] = await Promise.all([
-        base44.entities.Task.filter({ created_by: user.email }).catch(() => []),
-        base44.entities.WellnessEntry.filter({ created_by: user.email }).catch(() => []),
-        base44.entities.JournalEntry.filter({ created_by: user.email }).catch(() => []),
-        base44.entities.HabitTracker.filter({ created_by: user.email }).catch(() => []),
-        base44.entities.ChallengeParticipant.filter({ participant_email: user.email }).catch(() => []),
-        base44.entities.FamilyEvent.filter({ created_by: user.email }).catch(() => []),
-        base44.entities.KidsJournalEntry.filter({ created_by: user.email }).catch(() => []),
-        base44.entities.HabitCompletion.filter({ created_by: user.email }).catch(() => [])
+      const [
+        { data: tasks },
+        { data: wellnessEntries },
+        { data: journalEntries },
+        { data: habits },
+        { data: challenges },
+        { data: familyEvents },
+        { data: kidsProgress },
+        { data: completedHabits }
+      ] = await Promise.all([
+        supabase.from('tasks').select('*').eq('user_id', user.id),
+        supabase.from('wellness_entries').select('*').eq('user_id', user.id),
+        supabase.from('journal_entries').select('*').eq('user_id', user.id),
+        supabase.from('habit_trackers').select('*').eq('user_id', user.id),
+        supabase.from('challenge_participants').select('*').eq('participant_email', user.email),
+        supabase.from('family_events').select('*').eq('user_id', user.id),
+        supabase.from('kids_journal_entries').select('*').eq('user_id', user.id),
+        supabase.from('habit_completions').select('*').eq('user_id', user.id)
       ]);
 
       const today = new Date().toISOString().split('T')[0];
@@ -339,7 +359,7 @@ export default function Dashboard() {
         wellness: {
           total: wellnessEntries.length,
           thisWeek: wellnessEntries.filter(w => new Date(w.date) >= thisWeek).length,
-          avgMood: wellnessEntries.length > 0 
+          avgMood: wellnessEntries.length > 0
             ? (wellnessEntries.reduce((sum, w) => sum + (w.mood_rating || 0), 0) / wellnessEntries.length).toFixed(1)
             : 0,
           lastEntry: wellnessEntries[wellnessEntries.length - 1]
@@ -384,26 +404,29 @@ export default function Dashboard() {
         const now = new Date().toISOString();
         const trialEnd = new Date();
         trialEnd.setDate(trialEnd.getDate() + 3);
-        
-        await base44.auth.updateMe({
-          subscription_status: 'trial',
-          trial_start_date: now,
-          trial_end_date: trialEnd.toISOString(),
-          trial_used: true
-        });
-        
+
+        await supabase
+          .from('profiles')
+          .update({
+            subscription_status: 'trial',
+            trial_start_date: now,
+            trial_end_date: trialEnd.toISOString(),
+            trial_used: true
+          })
+          .eq('id', user.id);
+
         queryClient.invalidateQueries(['currentUser']);
         toast.success('🎉 Your 3-day free trial has started! Explore all features!');
       }
     };
-    
+
     autoStartTrial();
   }, [user, queryClient]);
 
   const getUserTier = () => {
     if (!user) return 'free';
     if (user.role === 'admin') return 'executive';
-    
+
     const tier = user.subscription_tier?.toLowerCase() || 'free';
     return tier;
   };
@@ -411,21 +434,21 @@ export default function Dashboard() {
   const isFeatureAvailable = (pageName, featureTier) => {
     if (!user) return false;
     if (user.role === 'admin') return true;
-    
+
     const userTier = getUserTier();
     const tierHierarchy = ['free', 'basic', 'pro', 'executive'];
     const userTierIndex = tierHierarchy.indexOf(userTier);
     const featureTierIndex = tierHierarchy.indexOf(featureTier);
-    
+
     if (userTierIndex >= featureTierIndex) return true;
-    
+
     for (let i = 0; i <= userTierIndex; i++) {
       const tier = tierHierarchy[i];
       if (SUBSCRIPTION_TIERS[tier]?.features?.has(pageName)) {
         return true;
       }
     }
-    
+
     return false;
   };
 
@@ -501,9 +524,9 @@ export default function Dashboard() {
       toast.error('Tool already in your list');
       return;
     }
-    
+
     const updated = [...curatedTools, pageName];
-    await base44.auth.updateMe({ dashboard_curated_tools: updated });
+    await supabase.from('profiles').update({ dashboard_curated_tools: updated }).eq('id', user.id);
     queryClient.invalidateQueries(['currentUser']);
     toast.success('✨ Added to your curated tools!');
   };
@@ -511,7 +534,7 @@ export default function Dashboard() {
   // Remove tool from curated list
   const removeFromCurated = async (pageName) => {
     const updated = curatedTools.filter(t => t !== pageName);
-    await base44.auth.updateMe({ dashboard_curated_tools: updated });
+    await supabase.from('profiles').update({ dashboard_curated_tools: updated }).eq('id', user.id);
     queryClient.invalidateQueries(['currentUser']);
     toast.success('Removed from curated tools');
   };
@@ -525,7 +548,7 @@ export default function Dashboard() {
 
   // Save curated selections
   const saveCuratedTools = async () => {
-    await base44.auth.updateMe({ dashboard_curated_tools: tempCuratedTools });
+    await supabase.from('profiles').update({ dashboard_curated_tools: tempCuratedTools }).eq('id', user.id);
     queryClient.invalidateQueries(['currentUser']);
     setShowCurateModal(false);
     toast.success('✨ Curated tools updated!');
@@ -535,16 +558,16 @@ export default function Dashboard() {
 
   return (
     <>
-      <SEO 
+      <SEO
         title="Dashboard - Your AI Command Center | Helper33"
         description="Your personalized AI dashboard: track mental wellness, manage family, access homework help, plan meals, and use 33+ AI tools from one central hub."
         keywords="AI wellness dashboard, mental health tracker, family organizer, AI productivity hub, homework tracking, meal planning dashboard"
         structuredData={structuredData}
       />
-      
+
       <div className={`min-h-screen p-4 sm:p-6 ${isRTL ? 'rtl' : 'ltr'}`}>
         <div className="max-w-7xl mx-auto space-y-8">
-          
+
           {/* Hero Header */}
           <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -575,7 +598,7 @@ export default function Dashboard() {
               }}
               className="absolute -bottom-20 -left-20 w-64 h-64 bg-white/10 rounded-full blur-3xl"
             />
-            
+
             <div className="relative z-10">
               <motion.div
                 initial={{ scale: 0 }}
@@ -593,7 +616,7 @@ export default function Dashboard() {
                   </h1>
                 </div>
               </motion.div>
-              
+
               <p className="text-lg opacity-90 max-w-2xl mb-6">
                 Your AI-powered command center for wellness, productivity, and family management
               </p>
@@ -609,7 +632,7 @@ export default function Dashboard() {
                     <span className="font-bold">{SUBSCRIPTION_TIERS[userTier]?.name} Plan</span>
                   </motion.div>
                 )}
-                
+
                 {user?.role === 'admin' && (
                   <motion.div
                     initial={{ opacity: 0, x: -20 }}
@@ -704,7 +727,7 @@ export default function Dashboard() {
                     </motion.div>
                   );
                 })}
-                
+
                 {/* Add New Tool Button */}
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9 }}
@@ -829,15 +852,14 @@ export default function Dashboard() {
               <Layout className="w-6 h-6 text-purple-500" />
               Explore Features
             </h2>
-            
+
             <div className="flex items-center gap-2 bg-white rounded-xl p-1 shadow-lg border-2 border-purple-200">
               <motion.button
                 onClick={() => setViewMode('grouped')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${
-                  viewMode === 'grouped'
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${viewMode === 'grouped'
                     ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                     : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                  }`}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
@@ -846,11 +868,10 @@ export default function Dashboard() {
               </motion.button>
               <motion.button
                 onClick={() => setViewMode('grid')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${
-                  viewMode === 'grid'
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all ${viewMode === 'grid'
                     ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                     : 'text-gray-600 hover:bg-gray-100'
-                }`}
+                  }`}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
@@ -866,7 +887,7 @@ export default function Dashboard() {
               {Object.entries(FEATURE_CATEGORIES).map(([key, category], categoryIndex) => {
                 const CategoryIcon = category.icon;
                 const isExpanded = expandedCategory === key;
-                
+
                 const filteredFeatures = category.features.filter(feature =>
                   feature.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   feature.description.toLowerCase().includes(searchQuery.toLowerCase())
@@ -892,7 +913,7 @@ export default function Dashboard() {
                           className="w-full p-6 flex items-center justify-between hover:bg-white/50 transition-all rounded-lg"
                         >
                           <div className="flex items-center gap-4">
-                            <motion.div 
+                            <motion.div
                               className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${category.color} flex items-center justify-center shadow-xl`}
                               whileHover={{ scale: 1.1, rotate: 5 }}
                               transition={{ type: "spring", stiffness: 300 }}
@@ -930,7 +951,7 @@ export default function Dashboard() {
                                 const FeatureIcon = feature.icon;
                                 const available = isFeatureAvailable(feature.pageName, feature.tier);
                                 const isHovered = hoveredFeature === `${key}-${feature.pageName}`;
-                                
+
                                 return (
                                   <motion.div
                                     key={feature.pageName}
@@ -942,24 +963,23 @@ export default function Dashboard() {
                                     onHoverEnd={() => setHoveredFeature(null)}
                                   >
                                     <Link to={createPageUrl(feature.pageName)}>
-                                      <Card className={`h-full hover:shadow-xl transition-all group overflow-hidden border-2 ${
-                                        !available ? 'opacity-60 border-gray-200' : 'border-transparent hover:border-purple-300'
-                                      }`}>
+                                      <Card className={`h-full hover:shadow-xl transition-all group overflow-hidden border-2 ${!available ? 'opacity-60 border-gray-200' : 'border-transparent hover:border-purple-300'
+                                        }`}>
                                         <CardContent className="p-5 relative">
                                           <motion.div
                                             className={`absolute inset-0 bg-gradient-to-br ${feature.color} opacity-0 group-hover:opacity-10 transition-opacity`}
                                             animate={{ opacity: isHovered ? 0.1 : 0 }}
                                           />
-                                          
+
                                           <div className="relative z-10">
-                                            <motion.div 
+                                            <motion.div
                                               className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${feature.color} flex items-center justify-center shadow-xl mb-3`}
                                               whileHover={{ rotate: 360, scale: 1.1 }}
                                               transition={{ duration: 0.5 }}
                                             >
                                               <FeatureIcon className="w-7 h-7 text-white" />
                                             </motion.div>
-                                            
+
                                             <h4 className="font-bold text-gray-900 mb-1 flex items-center gap-2 flex-wrap">
                                               <span>{feature.title}</span>
                                               {!available && (
@@ -971,11 +991,11 @@ export default function Dashboard() {
                                                 </>
                                               )}
                                             </h4>
-                                            
+
                                             <p className="text-sm text-gray-600 mb-3 line-clamp-2">
                                               {isHovered ? feature.longDescription : feature.description}
                                             </p>
-                                            
+
                                             <div className="flex items-center gap-1 text-purple-600 text-xs font-semibold">
                                               <span>{available ? 'Open Tool' : 'Upgrade to unlock'}</span>
                                               <ArrowRight className="w-3 h-3" />
@@ -1010,7 +1030,7 @@ export default function Dashboard() {
                   const FeatureIcon = feature.icon;
                   const available = isFeatureAvailable(feature.pageName, feature.tier);
                   const isHovered = hoveredFeature === feature.pageName;
-                  
+
                   return (
                     <motion.div
                       key={feature.pageName}
@@ -1022,25 +1042,24 @@ export default function Dashboard() {
                       onHoverEnd={() => setHoveredFeature(null)}
                     >
                       <Link to={createPageUrl(feature.pageName)}>
-                        <Card className={`h-full hover:shadow-2xl transition-all group overflow-hidden border-2 ${
-                          !available ? 'opacity-60 border-gray-200' : 'border-transparent hover:border-purple-300'
-                        }`}>
+                        <Card className={`h-full hover:shadow-2xl transition-all group overflow-hidden border-2 ${!available ? 'opacity-60 border-gray-200' : 'border-transparent hover:border-purple-300'
+                          }`}>
                           <CardContent className="p-6 relative">
                             <motion.div
                               className={`absolute inset-0 bg-gradient-to-br ${feature.color} opacity-0 group-hover:opacity-10`}
                               animate={{ opacity: isHovered ? 0.1 : 0 }}
                               transition={{ duration: 0.3 }}
                             />
-                            
+
                             <div className="relative z-10">
-                              <motion.div 
+                              <motion.div
                                 className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${feature.color} flex items-center justify-center shadow-xl mb-4`}
                                 whileHover={{ rotate: 360, scale: 1.15 }}
                                 transition={{ duration: 0.6 }}
                               >
                                 <FeatureIcon className="w-8 h-8 text-white" />
                               </motion.div>
-                              
+
                               <div className="mb-2 flex items-center gap-2 flex-wrap">
                                 <Badge className="text-xs bg-purple-100 text-purple-700 border-0">
                                   {feature.categoryTitle}
@@ -1051,16 +1070,16 @@ export default function Dashboard() {
                                   </Badge>
                                 )}
                               </div>
-                              
+
                               <h4 className="font-bold text-gray-900 text-lg mb-2 flex items-center gap-2">
                                 <span>{feature.title}</span>
                                 {!available && <Lock className="w-4 h-4 text-gray-400" />}
                               </h4>
-                              
+
                               <p className="text-sm text-gray-600 mb-4 leading-relaxed">
                                 {isHovered ? feature.longDescription : feature.description}
                               </p>
-                              
+
                               <div className="flex items-center gap-2 text-purple-600 text-sm font-semibold">
                                 <span>{available ? 'Open Tool' : 'Upgrade to unlock'}</span>
                                 <motion.div
@@ -1226,20 +1245,20 @@ export default function Dashboard() {
                     className="pl-10 h-10 border-2 border-purple-200 focus:border-purple-400"
                   />
                 </div>
-                
+
                 <div className="flex-1 overflow-y-auto pr-2 space-y-6">
                   {Object.entries(FEATURE_CATEGORIES).map(([key, category]) => {
                     const CategoryIcon = category.icon;
                     const availableFeatures = category.features.filter(f => {
                       const isAvailable = isFeatureAvailable(f.pageName, f.tier);
-                      const matchesSearch = !curateSearchQuery || 
+                      const matchesSearch = !curateSearchQuery ||
                         f.title.toLowerCase().includes(curateSearchQuery.toLowerCase()) ||
                         f.description.toLowerCase().includes(curateSearchQuery.toLowerCase());
                       return isAvailable && matchesSearch;
                     });
-                    
+
                     if (availableFeatures.length === 0) return null;
-                    
+
                     return (
                       <div key={key} className="space-y-3">
                         <div className="flex items-center gap-3 pb-2 border-b border-gray-200">
@@ -1248,12 +1267,12 @@ export default function Dashboard() {
                           </div>
                           <h4 className="font-bold text-gray-900">{category.title}</h4>
                         </div>
-                        
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {availableFeatures.map(feature => {
                             const FeatureIcon = feature.icon;
                             const isSelected = tempCuratedTools.includes(feature.pageName);
-                            
+
                             return (
                               <motion.button
                                 key={feature.pageName}
@@ -1266,11 +1285,10 @@ export default function Dashboard() {
                                 }}
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
-                                className={`p-4 rounded-xl border-2 transition-all text-left flex items-center gap-3 ${
-                                  isSelected 
-                                    ? 'bg-purple-50 border-purple-400 shadow-md' 
+                                className={`p-4 rounded-xl border-2 transition-all text-left flex items-center gap-3 ${isSelected
+                                    ? 'bg-purple-50 border-purple-400 shadow-md'
                                     : 'bg-white border-gray-200 hover:border-purple-300 hover:shadow-sm'
-                                }`}
+                                  }`}
                               >
                                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${feature.color} flex items-center justify-center shadow-md flex-shrink-0`}>
                                   <FeatureIcon className="w-6 h-6 text-white" />
@@ -1279,11 +1297,10 @@ export default function Dashboard() {
                                   <h5 className="font-bold text-gray-900 text-sm truncate">{feature.title}</h5>
                                   <p className="text-xs text-gray-500 truncate">{feature.description}</p>
                                 </div>
-                                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                                  isSelected 
-                                    ? 'bg-purple-600 border-purple-600' 
+                                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${isSelected
+                                    ? 'bg-purple-600 border-purple-600'
                                     : 'border-gray-300'
-                                }`}>
+                                  }`}>
                                   {isSelected && <Check className="w-4 h-4 text-white" />}
                                 </div>
                               </motion.button>

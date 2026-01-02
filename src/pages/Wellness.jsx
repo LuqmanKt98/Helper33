@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,7 +70,7 @@ const SunRaysBackground = () => (
         ease: "easeInOut"
       }}
     />
-    
+
     {/* Sun rays */}
     {[...Array(12)].map((_, i) => (
       <motion.div
@@ -138,9 +139,8 @@ const EmotionalWeather = ({ value, onChange }) => {
               onClick={() => onChange(opt.mood)}
               whileHover={{ scale: 1.2, y: -5 }}
               whileTap={{ scale: 0.9 }}
-              className={`p-3 rounded-full transition-all duration-300 relative ${
-                value === opt.mood ? 'bg-white shadow-[0_0_25px_rgba(251,191,36,0.6)]' : `opacity-60 hover:opacity-100 ${opt.glow}`
-              }`}
+              className={`p-3 rounded-full transition-all duration-300 relative ${value === opt.mood ? 'bg-white shadow-[0_0_25px_rgba(251,191,36,0.6)]' : `opacity-60 hover:opacity-100 ${opt.glow}`
+                }`}
             >
               <opt.icon className={`w-8 h-8 ${opt.color}`} />
               {value === opt.mood && (
@@ -160,30 +160,30 @@ const EmotionalWeather = ({ value, onChange }) => {
 
 
 function AnimatedStat({ value, isPercentage = false }) {
-    const springValue = useSpring(0, { stiffness: 100, damping: 20 });
-    const displayValue = useTransform(springValue, (latest) => `${Math.round(latest)}${isPercentage ? '%' : ''}`);
+  const springValue = useSpring(0, { stiffness: 100, damping: 20 });
+  const displayValue = useTransform(springValue, (latest) => `${Math.round(latest)}${isPercentage ? '%' : ''}`);
 
-    useEffect(() => {
-        springValue.set(parseFloat(value) || 0);
-    }, [value, springValue]);
+  useEffect(() => {
+    springValue.set(parseFloat(value) || 0);
+  }, [value, springValue]);
 
-    return (
-        <motion.span>
-            {displayValue}
-        </motion.span>
-    );
+  return (
+    <motion.span>
+      {displayValue}
+    </motion.span>
+  );
 }
 
 const GoalCheckIcon = ({ icon: Icon, isComplete }) => (
-    <motion.div
-        animate={{
-            scale: isComplete ? [1, 1.3, 1] : 1,
-            color: isComplete ? '#10B981' : '#9CA3AF'
-        }}
-        transition={{ duration: 0.5, type: 'spring' }}
-    >
-        <Icon className="w-6 h-6" />
-    </motion.div>
+  <motion.div
+    animate={{
+      scale: isComplete ? [1, 1.3, 1] : 1,
+      color: isComplete ? '#10B981' : '#9CA3AF'
+    }}
+    transition={{ duration: 0.5, type: 'spring' }}
+  >
+    <Icon className="w-6 h-6" />
+  </motion.div>
 );
 
 // --- ENHANCED WELLNESS STATS WITH VISUAL PROGRESS ---
@@ -191,10 +191,10 @@ const WellnessStats = ({ stats, todayProgress, waterGoal = 8 }) => {
   const { level, xp, streak, achievements } = stats;
 
   const goals = {
-      mood: todayProgress.mood,
-      sleep: todayProgress.sleep,
-      water: todayProgress.water >= waterGoal,
-      exercise: todayProgress.exercise >= 30,
+    mood: todayProgress.mood,
+    sleep: todayProgress.sleep,
+    water: todayProgress.water >= waterGoal,
+    exercise: todayProgress.exercise >= 30,
   };
 
   const completedGoals = Object.values(goals).filter(Boolean).length;
@@ -243,13 +243,13 @@ const WellnessStats = ({ stats, todayProgress, waterGoal = 8 }) => {
             </div>
           </div>
           <div className="mt-5 pt-4 border-t border-gray-200/60">
-              <Label className="text-sm text-gray-700 mb-2 block text-center">Today's Goals</Label>
-              <div className="flex justify-around items-center text-gray-400">
-                  <GoalCheckIcon icon={Smile} isComplete={goals.mood} />
-                  <GoalCheckIcon icon={Moon} isComplete={goals.sleep} />
-                  <GoalCheckIcon icon={Droplets} isComplete={goals.water} />
-                  <GoalCheckIcon icon={Zap} isComplete={goals.exercise} />
-              </div>
+            <Label className="text-sm text-gray-700 mb-2 block text-center">Today's Goals</Label>
+            <div className="flex justify-around items-center text-gray-400">
+              <GoalCheckIcon icon={Smile} isComplete={goals.mood} />
+              <GoalCheckIcon icon={Moon} isComplete={goals.sleep} />
+              <GoalCheckIcon icon={Droplets} isComplete={goals.water} />
+              <GoalCheckIcon icon={Zap} isComplete={goals.exercise} />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -258,22 +258,41 @@ const WellnessStats = ({ stats, todayProgress, waterGoal = 8 }) => {
 };
 
 export default function Wellness() {
-  const { playSound, showNotification } = useNotifications();
-  const { trackActivity } = useActivityTracker();
+  const { user: authUser } = useAuth();
   const queryClient = useQueryClient();
 
   const today = new Date().toISOString().split('T')[0];
 
   // Use react-query for user data
   const { data: user, isLoading: isUserLoading } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me(),
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   // Use react-query for wellness entries
   const { data: wellnessEntries, isLoading: isLoadingEntries } = useQuery({
-    queryKey: ['wellnessEntries'],
-    queryFn: () => base44.entities.WellnessEntry.list('-updated_date'),
+    queryKey: ['wellnessEntries', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return [];
+      const { data, error } = await supabase
+        .from('wellness_entries')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('date', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser,
     initialData: [],
   });
 
@@ -282,17 +301,17 @@ export default function Wellness() {
   // Find the most recent entry for today (there might be duplicates)
   const wellnessEntryForToday = useMemo(() => {
     if (isLoadingEntries || !wellnessEntries) return null;
-    
+
     // Get all entries for today
     const todayEntries = wellnessEntries.filter(entry => entry.date === today);
-    
+
     if (todayEntries.length === 0) return null;
-    
+
     // If only one entry, return it directly.
     if (todayEntries.length === 1) {
       return todayEntries[0];
     }
-    
+
     // Merge multiple entries for today.
     // `wellnessEntries` are sorted by `-updated_date`, so `todayEntries[0]` is the most recently updated entry for today.
     // We start the accumulation with `todayEntries[0]` to ensure its ID and date are kept,
@@ -302,16 +321,16 @@ export default function Wellness() {
     const merged = todayEntries.reduce((acc, entry) => {
       return {
         // Keep the ID and date from the *initial* most recent entry
-        id: initialMostRecentEntry.id, 
+        id: initialMostRecentEntry.id,
         date: initialMostRecentEntry.date,
-        
+
         // For non-numeric fields: prioritize the current accumulated value (which started as the most recent).
         // If the accumulated value is null/empty, then fall back to the current entry's value.
         emotional_weather: acc.emotional_weather || entry.emotional_weather,
         sleep_quality: acc.sleep_quality || entry.sleep_quality,
         notes: acc.notes || entry.notes,
         is_logged_to_history: acc.is_logged_to_history || entry.is_logged_to_history,
-        
+
         // For numerical fields: take the maximum value encountered so far for the day.
         energy_level: Math.max(acc.energy_level || 0, entry.energy_level || 0),
         sleep_hours: Math.max(acc.sleep_hours || 0, entry.sleep_hours || 0),
@@ -320,7 +339,7 @@ export default function Wellness() {
         meditation_minutes: Math.max(acc.meditation_minutes || 0, entry.meditation_minutes || 0),
       };
     }, initialMostRecentEntry); // Start reduction with the most recent entry
-    
+
     return merged;
   }, [wellnessEntries, isLoadingEntries, today]);
 
@@ -384,7 +403,7 @@ export default function Wellness() {
         meditation_minutes: wellnessEntryForToday.meditation_minutes || 0,
         notes: wellnessEntryForToday.notes || "",
       };
-      
+
       setFormData(entryData);
 
       setTodayProgress({
@@ -404,7 +423,7 @@ export default function Wellness() {
         meditation_minutes: 0,
         notes: "",
       };
-      
+
       setFormData(resetData);
       setTodayProgress({ water: 0, exercise: 0, sleep: false, mood: false });
     }
@@ -427,8 +446,8 @@ export default function Wellness() {
     if (totalEntries > 0) {
       const sortedEntries = [...allEntries].sort((a, b) => new Date(b.date) - new Date(a.date));
       let currentDate = new Date();
-      if(new Date(sortedEntries[0].date + 'T00:00:00').toDateString() !== currentDate.toDateString()){
-         currentDate.setDate(currentDate.getDate() - 1);
+      if (new Date(sortedEntries[0].date + 'T00:00:00').toDateString() !== currentDate.toDateString()) {
+        currentDate.setDate(currentDate.getDate() - 1);
       }
 
       for (let i = 0; i < sortedEntries.length; i++) {
@@ -453,33 +472,33 @@ export default function Wellness() {
     const entryCount = recentEntries.length;
 
     if (entryCount < 3) {
-        setWeeklyInsights([]);
-        return;
+      setWeeklyInsights([]);
+      return;
     }
 
     const avgSleep = recentEntries.reduce((sum, e) => sum + (e.sleep_hours || 0), 0) / entryCount;
     if (avgSleep >= 7.5) {
-        insights.push({ type: 'sleep', text: `Great work! You've averaged over ${avgSleep.toFixed(1)} hours of sleep this week.` });
+      insights.push({ type: 'sleep', text: `Great work! You've averaged over ${avgSleep.toFixed(1)} hours of sleep this week.` });
     } else if (avgSleep < 6) {
-        insights.push({ type: 'sleep', text: `This week's average sleep was ${avgSleep.toFixed(1)} hours. Prioritizing rest could boost your energy.` });
+      insights.push({ type: 'sleep', text: `This week's average sleep was ${avgSleep.toFixed(1)} hours. Prioritizing rest could boost your energy.` });
     }
 
     const exerciseDays = recentEntries.filter(e => e.exercise_minutes >= 20).length;
     if (exerciseDays >= 3) {
-        insights.push({ type: 'exercise', text: `You were active on ${exerciseDays} days this week. Fantastic consistency!` });
+      insights.push({ type: 'exercise', text: `You were active on ${exerciseDays} days this week. Fantastic consistency!` });
     }
 
     const avgWater = recentEntries.reduce((sum, e) => sum + (e.water_intake || 0), 0) / entryCount;
     if (avgWater >= wellnessSettings.water_goal) {
-        insights.push({ type: 'water', text: `Excellent hydration! You averaged ${avgWater.toFixed(1)} glasses per day this week.` });
+      insights.push({ type: 'water', text: `Excellent hydration! You averaged ${avgWater.toFixed(1)} glasses per day this week.` });
     }
 
     const highEnergyDays = recentEntries.filter(e => e.energy_level && e.energy_level >= 7);
     if (highEnergyDays.length > 0) {
-        const highEnergyWithExercise = highEnergyDays.filter(e => e.exercise_minutes && e.exercise_minutes > 0).length;
-        if (highEnergyWithExercise / highEnergyDays.length > 0.5) {
-            insights.push({ type: 'exercise', text: "It looks like movement is a great way to boost your energy levels!" });
-        }
+      const highEnergyWithExercise = highEnergyDays.filter(e => e.exercise_minutes && e.exercise_minutes > 0).length;
+      if (highEnergyWithExercise / highEnergyDays.length > 0.5) {
+        insights.push({ type: 'exercise', text: "It looks like movement is a great way to boost your energy levels!" });
+      }
     }
 
     setWeeklyInsights(insights);
@@ -498,55 +517,56 @@ export default function Wellness() {
   // New useEffect to log previous day's wellness totals to HealthLog
   useEffect(() => {
     const logPreviousDaySummary = async () => {
-        if (isLoadingEntries || !wellnessEntries || wellnessEntries.length === 0) return;
+      if (isLoadingEntries || !wellnessEntries || wellnessEntries.length === 0) return;
 
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayString = yesterday.toISOString().slice(0, 10);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayString = yesterday.toISOString().slice(0, 10);
 
-        const yesterdayEntry = wellnessEntries.find(entry => entry.date === yesterdayString);
+      const yesterdayEntry = wellnessEntries.find(entry => entry.date === yesterdayString);
 
-        if (yesterdayEntry && !yesterdayEntry.is_logged_to_history) {
-            const logsToCreate = [];
+      if (yesterdayEntry && !yesterdayEntry.is_logged_to_history) {
+        const logsToCreate = [];
 
-            if (yesterdayEntry.water_intake > 0) {
-                logsToCreate.push({
-                    log_type: 'water',
-                    title: 'Total Daily Water Intake',
-                    log_date: `${yesterdayString}T23:59:59`,
-                    details: { water_glasses: yesterdayEntry.water_intake },
-                    notes: `Automated summary from ${yesterdayString}.`
-                });
-            }
-
-            if (yesterdayEntry.exercise_minutes > 0) {
-                logsToCreate.push({
-                    log_type: 'activity',
-                    title: 'Total Daily Activity',
-                    log_date: `${yesterdayString}T23:59:59`,
-                    details: { duration_minutes: yesterdayEntry.exercise_minutes },
-                    notes: `Automated summary from ${yesterdayString}.`
-                });
-            }
-
-            if (logsToCreate.length > 0) {
-                try {
-                    await base44.entities.HealthLog.bulkCreate(logsToCreate);
-                    await base44.entities.WellnessEntry.update(yesterdayEntry.id, { is_logged_to_history: true });
-                    queryClient.invalidateQueries({ queryKey: ['healthLogs'] });
-                    queryClient.invalidateQueries({ queryKey: ['wellnessEntries'] });
-                } catch (error) {
-                    console.error("Failed to log yesterday's summary:", error);
-                }
-            } else {
-                 await base44.entities.WellnessEntry.update(yesterdayEntry.id, { is_logged_to_history: true });
-                 queryClient.invalidateQueries({ queryKey: ['wellnessEntries'] });
-            }
+        if (yesterdayEntry.water_intake > 0) {
+          logsToCreate.push({
+            log_type: 'water',
+            title: 'Total Daily Water Intake',
+            log_date: `${yesterdayString}T23:59:59`,
+            details: { water_glasses: yesterdayEntry.water_intake },
+            notes: `Automated summary from ${yesterdayString}.`
+          });
         }
+
+        if (yesterdayEntry.exercise_minutes > 0) {
+          logsToCreate.push({
+            log_type: 'activity',
+            title: 'Total Daily Activity',
+            log_date: `${yesterdayString}T23:59:59`,
+            details: { duration_minutes: yesterdayEntry.exercise_minutes },
+            notes: `Automated summary from ${yesterdayString}.`
+          });
+        }
+
+        if (logsToCreate.length > 0) {
+          try {
+            const logsWithUserId = logsToCreate.map(log => ({ ...log, user_id: authUser.id }));
+            await supabase.from('health_logs').insert(logsWithUserId);
+            await supabase.from('wellness_entries').update({ is_logged_to_history: true }).eq('id', yesterdayEntry.id);
+            queryClient.invalidateQueries({ queryKey: ['healthLogs'] });
+            queryClient.invalidateQueries({ queryKey: ['wellnessEntries'] });
+          } catch (error) {
+            console.error("Failed to log yesterday's summary:", error);
+          }
+        } else {
+          await supabase.from('wellness_entries').update({ is_logged_to_history: true }).eq('id', yesterdayEntry.id);
+          queryClient.invalidateQueries({ queryKey: ['wellnessEntries'] });
+        }
+      }
     };
 
     if (wellnessEntries && !isLoadingEntries) {
-        logPreviousDaySummary();
+      logPreviousDaySummary();
     }
   }, [wellnessEntries, isLoadingEntries, queryClient, today]);
 
@@ -560,7 +580,7 @@ export default function Wellness() {
     }
 
     try {
-      await base44.auth.updateMe({ wellness_settings: newSettings });
+      await supabase.from('profiles').update({ wellness_settings: newSettings }).eq('id', authUser.id);
       setWellnessSettings(newSettings);
       playSound('success');
       toast.success("Wellness settings updated!", {
@@ -579,10 +599,24 @@ export default function Wellness() {
   // Mutation for saving wellness entries
   const saveEntryMutation = useMutation({
     mutationFn: async (entryData) => {
+      if (!authUser) throw new Error("Auth required");
       if (wellnessEntryForToday) {
-        return await base44.entities.WellnessEntry.update(wellnessEntryForToday.id, entryData);
+        const { data, error } = await supabase
+          .from('wellness_entries')
+          .update(entryData)
+          .eq('id', wellnessEntryForToday.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
       } else {
-        return await base44.entities.WellnessEntry.create(entryData);
+        const { data, error } = await supabase
+          .from('wellness_entries')
+          .insert({ ...entryData, user_id: authUser.id })
+          .select()
+          .single();
+        if (error) throw error;
+        return data;
       }
     },
     onSuccess: (savedEntry) => {
@@ -606,9 +640,9 @@ export default function Wellness() {
     if (showToast) {
       playSound('click');
     }
-    
+
     const isNewEntry = !wellnessEntryForToday;
-    
+
     try {
       const entryData = {
         ...formData,
@@ -621,7 +655,7 @@ export default function Wellness() {
       if (showToast) {
         playSound('success');
       }
-      
+
       setTodayProgress({
         water: formData.water_intake,
         exercise: formData.exercise_minutes,
@@ -671,23 +705,23 @@ export default function Wellness() {
         if (completedGoals === 4) {
           playSound('complete');
           toast.success('🌟 Perfect Wellness Day!', {
-              description: "You've completed all your goals!",
-              duration: 5000,
+            description: "You've completed all your goals!",
+            duration: 5000,
           });
         } else {
           toast.success('Entry Saved!', {
-              description: `Keep up the great work!`,
+            description: `Keep up the great work!`,
           });
         }
       }
-      
+
       return savedEntry;
     } catch (error) {
       console.log("Error saving wellness entry", error);
       if (showToast) {
         playSound('error');
         toast.error("Couldn't save your entry.", {
-            description: "Please try again in a moment."
+          description: "Please try again in a moment."
         });
       }
       throw error;
@@ -708,19 +742,19 @@ export default function Wellness() {
 
   // Debounced auto-save effect
   useEffect(() => {
-    const hasMeaningfulData = formData.water_intake > 0 || 
-                               formData.exercise_minutes > 0 || 
-                               formData.sleep_hours > 0 ||
-                               formData.emotional_weather !== null ||
-                               formData.notes !== "";
-    
+    const hasMeaningfulData = formData.water_intake > 0 ||
+      formData.exercise_minutes > 0 ||
+      formData.sleep_hours > 0 ||
+      formData.emotional_weather !== null ||
+      formData.notes !== "";
+
     if (isLoadingEntries || (!hasMeaningfulData && !wellnessEntryForToday)) {
       return;
     }
 
     // Don't auto-save for guests, let the manual save trigger the prompt
     if (!user) {
-        return;
+      return;
     }
 
     const timeoutId = setTimeout(() => {
@@ -756,7 +790,7 @@ export default function Wellness() {
         url="https://www.helper33.com/Wellness"
         structuredData={seo.structuredData}
       />
-      
+
       {/* Sunlight-Inspired Background */}
       <div className="min-h-screen relative overflow-hidden">
         {/* Dynamic Gradient Background - Sunrise/Sunset */}
@@ -792,7 +826,7 @@ export default function Wellness() {
 
           {/* Guest Prompt Modal */}
           {showGuestPrompt && (
-            <GuestPrompt 
+            <GuestPrompt
               action="save your wellness entries"
               onCancel={() => setShowGuestPrompt(false)}
             />
@@ -805,12 +839,12 @@ export default function Wellness() {
             className="text-center mb-8"
           >
             <motion.div
-              animate={{ 
+              animate={{
                 rotate: [0, 5, -5, 0],
                 scale: [1, 1.1, 1]
               }}
-              transition={{ 
-                duration: 4, 
+              transition={{
+                duration: 4,
                 repeat: Infinity,
                 ease: "easeInOut"
               }}
@@ -833,7 +867,7 @@ export default function Wellness() {
                 />
               </div>
             </motion.div>
-            
+
             <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from-orange-600 via-amber-500 to-yellow-500 bg-clip-text text-transparent drop-shadow-sm">
               Daily Wellness Tracking
             </h1>
@@ -866,10 +900,10 @@ export default function Wellness() {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.5 }}
             >
-              <WellnessStats 
-                stats={gamificationStats} 
-                todayProgress={todayProgress} 
-                waterGoal={wellnessSettings.water_goal} 
+              <WellnessStats
+                stats={gamificationStats}
+                todayProgress={todayProgress}
+                waterGoal={wellnessSettings.water_goal}
               />
             </motion.div>
           )}
@@ -878,24 +912,24 @@ export default function Wellness() {
           <div className="grid lg:grid-cols-3 gap-8 mt-12">
             {/* Daily Entry Form - Sunlight Glass Card */}
             <div className="lg:col-span-2 space-y-8">
-              <motion.div 
+              <motion.div
                 whileHover={{ y: -5, scale: 1.01 }}
                 transition={{ type: "spring", stiffness: 300 }}
               >
                 <Card className={`${SUNLIGHT_GLASS_CARD} border-0 shadow-[0_12px_40px_rgba(251,146,60,0.3)] overflow-hidden relative`}>
                   {/* Sunlight reflection overlay */}
                   <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-yellow-300/20 via-amber-200/10 to-transparent rounded-bl-[120px] blur-2xl" />
-                  
+
                   <CardHeader className="relative z-10">
                     <CardTitle className="flex items-center gap-3">
                       <motion.div
-                          animate={{ 
-                            rotate: [0, 10, 0],
-                            scale: [1, 1.15, 1]
-                          }}
-                          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                        animate={{
+                          rotate: [0, 10, 0],
+                          scale: [1, 1.15, 1]
+                        }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                       >
-                          <Heart className="w-7 h-7 text-orange-500" />
+                        <Heart className="w-7 h-7 text-orange-500" />
                       </motion.div>
                       <span className="bg-gradient-to-r from-orange-600 via-amber-600 to-yellow-600 bg-clip-text text-transparent font-bold text-2xl">
                         Today's Reflection
@@ -933,13 +967,13 @@ export default function Wellness() {
                           <Moon className="w-4 h-4 text-indigo-500" />
                           Sleep (hrs)
                         </Label>
-                        <Input 
-                          id="sleep" 
-                          type="number" 
-                          min="0" 
-                          max="24" 
-                          step="0.5" 
-                          value={formData.sleep_hours} 
+                        <Input
+                          id="sleep"
+                          type="number"
+                          min="0"
+                          max="24"
+                          step="0.5"
+                          value={formData.sleep_hours}
                           onChange={(e) => updateFormData('sleep_hours', parseFloat(e.target.value) || 0)}
                           className="border-2 border-amber-200/50 bg-white/60 rounded-xl focus:ring-2 focus:ring-amber-400 focus:border-amber-400 text-amber-900 placeholder-amber-600/50 shadow-inner"
                         />
@@ -949,11 +983,11 @@ export default function Wellness() {
                           <Droplets className="w-4 h-4 text-blue-500" />
                           Water (glasses)
                         </Label>
-                        <Input 
-                          id="water" 
-                          type="number" 
-                          min="0" 
-                          value={formData.water_intake} 
+                        <Input
+                          id="water"
+                          type="number"
+                          min="0"
+                          value={formData.water_intake}
                           onChange={(e) => updateFormData('water_intake', parseInt(e.target.value) || 0)}
                           className="border-2 border-amber-200/50 bg-white/60 rounded-xl focus:ring-2 focus:ring-amber-400 focus:border-amber-400 text-amber-900 placeholder-amber-600/50 shadow-inner"
                         />
@@ -963,11 +997,11 @@ export default function Wellness() {
                           <Zap className="w-4 h-4 text-orange-500" />
                           Exercise (min)
                         </Label>
-                        <Input 
-                          id="exercise" 
-                          type="number" 
-                          min="0" 
-                          value={formData.exercise_minutes} 
+                        <Input
+                          id="exercise"
+                          type="number"
+                          min="0"
+                          value={formData.exercise_minutes}
                           onChange={(e) => updateFormData('exercise_minutes', parseInt(e.target.value) || 0)}
                           className="border-2 border-amber-200/50 bg-white/60 rounded-xl focus:ring-2 focus:ring-amber-400 focus:border-amber-400 text-amber-900 placeholder-amber-600/50 shadow-inner"
                         />
@@ -977,11 +1011,11 @@ export default function Wellness() {
                     {/* Notes */}
                     <div>
                       <Label htmlFor="notes" className="text-base font-medium text-amber-900">Additional Reflections</Label>
-                      <Textarea 
-                        id="notes" 
-                        value={formData.notes} 
-                        onChange={(e) => updateFormData('notes', e.target.value)} 
-                        placeholder="Any thoughts or insights from today?" 
+                      <Textarea
+                        id="notes"
+                        value={formData.notes}
+                        onChange={(e) => updateFormData('notes', e.target.value)}
+                        placeholder="Any thoughts or insights from today?"
                         className="h-24 mt-2 border-2 border-amber-200/50 bg-white/60 rounded-xl focus:ring-2 focus:ring-amber-400 focus:border-amber-400 text-amber-900 placeholder-amber-600/50"
                       />
                     </div>
@@ -1043,14 +1077,14 @@ export default function Wellness() {
                   <WeatherInsight emotionalWeather={formData.emotional_weather} />
                 </div>
               </motion.div>
-            
+
               <motion.div whileHover={{ y: -5, scale: 1.01 }} transition={{ type: "spring", stiffness: 300 }}>
                 <Card className={`${SUNLIGHT_GLASS_CARD} border-0 shadow-[0_12px_40px_rgba(239,68,68,0.2)]`}>
                   <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-rose-700">
-                        <ShieldAlert className="w-5 h-5"/>
-                        Urgent Support
-                      </CardTitle>
+                    <CardTitle className="flex items-center gap-2 text-rose-700">
+                      <ShieldAlert className="w-5 h-5" />
+                      Urgent Support
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <p className="text-sm text-amber-900 mb-4 font-medium">If you are in crisis or need immediate help, please use this button to alert your support network.</p>

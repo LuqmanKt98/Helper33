@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -44,15 +45,29 @@ export default function CommunityPrivacySettings({ user, onClose }) {
   const { data: communityProfile } = useQuery({
     queryKey: ['communityProfile'],
     queryFn: async () => {
-      const profiles = await base44.entities.UserCommunityProfile.list();
-      return profiles[0];
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*, community_profile:id(*)')
+        .eq('id', user.id)
+        .single();
+
+      if (error) return null;
+      return data.community_profile;
     }
   });
 
   const updateUserMutation = useMutation({
-    mutationFn: (data) => base44.auth.updateMe(data),
+    mutationFn: async (data) => {
+      const { error } = await supabase
+        .from('profiles')
+        .update(data)
+        .eq('id', user.id);
+      if (error) throw error;
+      return data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['currentUser']);
+      queryClient.invalidateQueries(['user', user.id]);
       queryClient.invalidateQueries(['communityProfile']);
       toast.success('Privacy settings updated!');
     }
@@ -123,14 +138,14 @@ export default function CommunityPrivacySettings({ user, onClose }) {
 
   const handlePrivacyChange = (key, value) => {
     const updatedPrivacy = { ...privacy, [key]: value };
-    
+
     if (key === 'is_fully_anonymous' && value === true) {
       updatedPrivacy.show_avatar = false;
       updatedPrivacy.show_bio = false;
       updatedPrivacy.is_visible = false;
       updatedPrivacy.discoverable_by = 'nobody';
     }
-    
+
     if (key === 'is_visible' && value === true) {
       updatedPrivacy.is_fully_anonymous = false;
     }
@@ -146,8 +161,18 @@ export default function CommunityPrivacySettings({ user, onClose }) {
   const generateInviteCodeIfNeeded = async () => {
     if (!user.invite_code) {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      await base44.auth.updateMe({ invite_code: code });
+      const { error } = await supabase
+        .from('profiles')
+        .update({ invite_code: code })
+        .eq('id', user.id);
+
+      if (error) {
+        console.error('Error generating invite code:', error);
+        return null;
+      }
+
       queryClient.invalidateQueries(['currentUser']);
+      queryClient.invalidateQueries(['user', user.id]);
       toast.success('Invite code generated!');
       return code;
     }
@@ -301,7 +326,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
               <h3 className="text-2xl font-bold text-center mb-6 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
                 💜 Share Your Connection Link
               </h3>
-              
+
               <div className="grid grid-cols-2 gap-3">
                 <ShareButton
                   icon={MessageCircle}
@@ -395,11 +420,11 @@ export default function CommunityPrivacySettings({ user, onClose }) {
                   Copy Link
                 </Button>
               </div>
-              <Button 
+              <Button
                 onClick={() => {
                   setShowQRCode(false);
                   setShowShareMenu(true);
-                }} 
+                }}
                 className="w-full mt-2 bg-gradient-to-r from-purple-600 to-pink-600"
               >
                 <Share2 className="w-4 h-4 mr-2" />
@@ -432,7 +457,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
             onClick={() => handleVisibilityModeChange('invisible')}
             features={['No community presence', 'Private use only', 'No one can find you']}
           />
-          
+
           <PrivacyModeCard
             mode="anonymous"
             title="🎭 Anonymous (Emoji Only)"
@@ -441,7 +466,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
             onClick={() => handleVisibilityModeChange('anonymous')}
             features={['Emoji only display', 'Share achievements', 'Connect anonymously', 'Cannot view visible profiles']}
           />
-          
+
           <PrivacyModeCard
             mode="semi_visible"
             title="🔒 Semi-Visible (Contacts Only)"
@@ -450,7 +475,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
             onClick={() => handleVisibilityModeChange('semi_visible')}
             features={['Contacts can find you', 'Show name & avatar', 'View other visible profiles', 'Code sharing']}
           />
-          
+
           <PrivacyModeCard
             mode="fully_visible"
             title="🌟 Fully Visible"
@@ -466,12 +491,11 @@ export default function CommunityPrivacySettings({ user, onClose }) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <Card className={`border-2 ${
-          currentMode === 'invisible' ? 'border-gray-400 bg-gray-50' :
-          currentMode === 'anonymous' ? 'border-blue-400 bg-blue-50' :
-          currentMode === 'semi_visible' ? 'border-purple-400 bg-purple-50' :
-          'border-green-400 bg-green-50'
-        }`}>
+        <Card className={`border-2 ${currentMode === 'invisible' ? 'border-gray-400 bg-gray-50' :
+            currentMode === 'anonymous' ? 'border-blue-400 bg-blue-50' :
+              currentMode === 'semi_visible' ? 'border-purple-400 bg-purple-50' :
+                'border-green-400 bg-green-50'
+          }`}>
           <CardContent className="p-6">
             <div className="flex items-center gap-4 mb-4">
               <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-3xl shadow-lg">
@@ -486,8 +510,8 @@ export default function CommunityPrivacySettings({ user, onClose }) {
                   How Others See You:
                 </h3>
                 <p className="text-2xl font-bold text-purple-600">
-                  {privacy.is_fully_anonymous 
-                    ? `${user.profile_emoji || '🎭'}` 
+                  {privacy.is_fully_anonymous
+                    ? `${user.profile_emoji || '🎭'}`
                     : user.preferred_name || user.full_name?.split(' ')[0] || 'You'
                   }
                 </p>
@@ -512,8 +536,8 @@ export default function CommunityPrivacySettings({ user, onClose }) {
                 label="Discoverable"
                 value={
                   privacy.discoverable_by === 'everyone' ? 'Everyone' :
-                  privacy.discoverable_by === 'contacts_only' ? 'Contacts Only' :
-                  'Nobody'
+                    privacy.discoverable_by === 'contacts_only' ? 'Contacts Only' :
+                      'Nobody'
                 }
                 active={privacy.discoverable_by !== 'nobody'}
               />
@@ -709,7 +733,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
               checked={privacy.show_avatar}
               onChange={(val) => handlePrivacyChange('show_avatar', val)}
             />
-            
+
             <ToggleSetting
               icon={FileText}
               label="Show Bio"
@@ -717,7 +741,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
               checked={privacy.show_bio}
               onChange={(val) => handlePrivacyChange('show_bio', val)}
             />
-            
+
             <ToggleSetting
               icon={MapPin}
               label="Show Location"
@@ -725,7 +749,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
               checked={privacy.show_location}
               onChange={(val) => handlePrivacyChange('show_location', val)}
             />
-            
+
             <ToggleSetting
               icon={Sparkles}
               label="Show Activity & Achievements"
@@ -733,7 +757,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
               checked={privacy.show_activity}
               onChange={(val) => handlePrivacyChange('show_activity', val)}
             />
-            
+
             <ToggleSetting
               icon={UserPlus}
               label="Allow Friend Requests"
@@ -741,7 +765,7 @@ export default function CommunityPrivacySettings({ user, onClose }) {
               checked={privacy.allow_friend_requests}
               onChange={(val) => handlePrivacyChange('allow_friend_requests', val)}
             />
-            
+
             <ToggleSetting
               icon={Users}
               label="Allow Buddy Requests"
@@ -802,11 +826,10 @@ function PrivacyModeCard({ mode, title, description, isActive, onClick, features
       onClick={onClick}
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.98 }}
-      className={`w-full p-4 rounded-xl border-3 text-left transition-all ${
-        isActive
+      className={`w-full p-4 rounded-xl border-3 text-left transition-all ${isActive
           ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white border-purple-700 shadow-xl'
           : 'bg-white border-gray-300 hover:border-purple-400 hover:shadow-lg'
-      }`}
+        }`}
     >
       <div className="flex items-start justify-between mb-2">
         <h4 className={`font-bold text-lg ${isActive ? 'text-white' : 'text-gray-900'}`}>
@@ -862,11 +885,10 @@ function ToggleSetting({ icon: Icon, label, description, checked, onChange }) {
 
 function InfoBadge({ icon: Icon, label, value, active }) {
   return (
-    <div className={`p-3 rounded-lg border-2 ${
-      active 
-        ? 'bg-purple-100 border-purple-300' 
+    <div className={`p-3 rounded-lg border-2 ${active
+        ? 'bg-purple-100 border-purple-300'
         : 'bg-gray-50 border-gray-200'
-    }`}>
+      }`}>
       <div className="flex items-center gap-2 mb-1">
         <Icon className={`w-4 h-4 ${active ? 'text-purple-600' : 'text-gray-500'}`} />
         <p className="text-xs font-semibold text-gray-600">{label}</p>

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { MessageCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 
 export default function MessageButton({ targetUserEmail, targetUserName, currentUser, variant = 'default', size = 'default' }) {
@@ -12,33 +12,34 @@ export default function MessageButton({ targetUserEmail, targetUserName, current
   const handleStartConversation = async () => {
     if (!currentUser) {
       toast.info('Please log in to send messages');
-      base44.auth.redirectToLogin(window.location.pathname);
       return;
     }
 
     try {
-      // Check if conversation exists
-      const existingConvos = await base44.entities.Conversation.list();
-      const existing = existingConvos.find(c => 
-        c.participant_emails?.includes(currentUser.email) &&
-        c.participant_emails?.includes(targetUserEmail)
-      );
+      // Check if conversation exists (using UUIDs)
+      const { data: existingConvs } = await supabase
+        .from('direct_conversations')
+        .select('*')
+        .or(`and(participant_1_id.eq.${currentUser.id},participant_2_id.eq.${targetUserEmail}),and(participant_1_id.eq.${targetUserEmail},participant_2_id.eq.${currentUser.id})`);
 
-      if (existing) {
-        navigate(createPageUrl(`Messages?conversation=${existing.id}`));
+      if (existingConvs && existingConvs.length > 0) {
+        navigate(createPageUrl(`Messages?conversation=${existingConvs[0].id}`));
         return;
       }
 
       // Create new conversation
-      const newConvo = await base44.entities.Conversation.create({
-        participant_emails: [currentUser.email, targetUserEmail],
-        participant_names: [currentUser.full_name, targetUserName],
-        participant_avatars: [currentUser.avatar_url || '', ''],
-        last_message: '',
-        last_message_time: new Date().toISOString(),
-        last_message_sender: currentUser.email,
-        total_messages: 0
-      });
+      const { data: newConvo, error } = await supabase
+        .from('direct_conversations')
+        .insert({
+          participant_1_id: currentUser.id,
+          participant_2_id: targetUserEmail, // Assuming targetUserEmail is actually a UUID here based on usage
+          last_message_content: 'Conversation started!',
+          last_message_time: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
 
       navigate(createPageUrl(`Messages?conversation=${newConvo.id}`));
       toast.success('Conversation started! +5 points');

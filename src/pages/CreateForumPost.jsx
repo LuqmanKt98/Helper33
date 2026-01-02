@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,9 +36,21 @@ export default function CreateForumPost() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState([]);
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me(),
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const categories = [
@@ -54,25 +67,16 @@ export default function CreateForumPost() {
     if (!title || !content) return;
 
     try {
-      const response = await base44.integrations.Core.InvokeLLM({
-        prompt: `Based on this forum post, suggest 3-5 relevant tags and a brief content improvement tip:
-        
-Title: ${title}
-Content: ${content}
-
-Return a JSON object with:
-- tags: array of 3-5 relevant tags
-- tip: one sentence to improve the post`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            tags: { type: "array", items: { type: "string" } },
-            tip: { type: "string" }
-          }
+      const { data, error } = await supabase.functions.invoke('process-ai', {
+        body: {
+          action: 'suggest-forum-tags',
+          title: title,
+          content: content
         }
       });
 
-      setAiSuggestions(response);
+      if (error) throw error;
+      setAiSuggestions(data);
     } catch (error) {
       console.error('Error generating AI suggestions:', error);
     }
@@ -100,51 +104,45 @@ Return a JSON object with:
     setIsSubmitting(true);
 
     try {
-      // AI Moderation check
-      const moderationResponse = await base44.integrations.Core.InvokeLLM({
-        prompt: `Analyze this forum post for safety and appropriateness:
-
-Title: ${title}
-Content: ${content}
-
-Check for:
-- Harmful content
-- Personal information
-- Inappropriate language
-- Spam
-
-Return a safety score from 0 (unsafe) to 1 (safe) and brief notes.`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            safety_score: { type: "number" },
-            notes: { type: "string" },
-            is_safe: { type: "boolean" }
-          }
+      // AI Moderation check via Edge Function
+      const { data: moderationResponse, error: moderationError } = await supabase.functions.invoke('process-ai', {
+        body: {
+          action: 'moderate-forum-post',
+          title: title.trim(),
+          content: content.trim()
         }
       });
 
+      if (moderationError) throw moderationError;
+
       // Create the post
-      const newPost = await base44.entities.ForumPost.create({
-        category_id: selectedCategory,
-        title: title.trim(),
-        content: content.trim(),
-        author_name: isAnonymous ? 'Anonymous' : user.full_name,
-        author_avatar: isAnonymous ? null : user.avatar_url,
-        is_anonymous: isAnonymous,
-        tags: tags,
-        status: moderationResponse.is_safe ? 'approved' : 'pending',
-        ai_moderation_score: moderationResponse.safety_score,
-        ai_moderation_notes: moderationResponse.notes,
-        last_activity_date: new Date().toISOString(),
-        view_count: 0,
-        comment_count: 0,
-        like_count: 0
-      });
+      const { data: newPost, error: postError } = await supabase
+        .from('posts')
+        .insert({
+          category_id: selectedCategory,
+          title: title.trim(),
+          content: content.trim(),
+          author_name: isAnonymous ? 'Anonymous' : user.full_name,
+          author_avatar_url: isAnonymous ? null : user.avatar_url,
+          is_anonymous: isAnonymous,
+          tags: tags,
+          status: moderationResponse.is_safe ? 'approved' : 'pending',
+          ai_moderation_score: moderationResponse.safety_score,
+          ai_moderation_notes: moderationResponse.notes,
+          last_activity_at: new Date().toISOString(),
+          view_count: 0,
+          comment_count: 0,
+          like_count: 0,
+          created_by: user.id
+        })
+        .select()
+        .single();
+
+      if (postError) throw postError;
 
       // Update category post count
-      queryClient.invalidateQueries(['forumCategories']);
-      queryClient.invalidateQueries(['forumPosts']);
+      queryClient.invalidateQueries({ queryKey: ['forumCategories'] });
+      queryClient.invalidateQueries({ queryKey: ['forumPosts'] });
 
       if (moderationResponse.is_safe) {
         toast.success('Post created successfully!');
@@ -164,7 +162,7 @@ Return a safety score from 0 (unsafe) to 1 (safe) and brief notes.`,
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 p-4 sm:p-6">
       <div className="max-w-4xl mx-auto space-y-6">
-        
+
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
@@ -200,7 +198,7 @@ Return a safety score from 0 (unsafe) to 1 (safe) and brief notes.`,
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              
+
               {/* Category Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -211,11 +209,10 @@ Return a safety score from 0 (unsafe) to 1 (safe) and brief notes.`,
                     <div
                       key={category.id}
                       onClick={() => setSelectedCategory(category.id)}
-                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                        selectedCategory === category.id
-                          ? 'border-purple-500 bg-purple-50'
-                          : 'border-gray-200 hover:border-purple-300'
-                      }`}
+                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedCategory === category.id
+                        ? 'border-purple-500 bg-purple-50'
+                        : 'border-gray-200 hover:border-purple-300'
+                        }`}
                     >
                       <p className="font-semibold text-gray-900">{category.name}</p>
                     </div>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,11 +31,23 @@ export default function NewMessageModal({ isOpen, onClose, currentUser, onConver
   const { data: profiles = [], isLoading } = useQuery({
     queryKey: ['communityProfiles', searchQuery],
     queryFn: async () => {
-      const allProfiles = await base44.entities.CommunityProfile.filter({}, '-created_date', 50);
-      return allProfiles.filter(p => 
-        p.created_by !== currentUser.email &&
-        (p.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) || !searchQuery)
-      );
+      let query = supabase
+        .from('profiles')
+        .select('*')
+        .neq('id', currentUser.id)
+        .limit(50);
+
+      if (searchQuery) {
+        query = query.ilike('full_name', `%${searchQuery}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return data.map(p => ({
+        ...p,
+        display_name: p.full_name // Map to expected display_name
+      }));
     },
     enabled: isOpen
   });
@@ -60,27 +72,75 @@ export default function NewMessageModal({ isOpen, onClose, currentUser, onConver
 
   const sendMessageMutation = useMutation({
     mutationFn: async () => {
-      const conversationId = generateConversationId(currentUser.email, selectedUser.created_by);
-      
+      // 1. Check if conversation already exists
+      const { data: convs, error: findError } = await supabase
+        .from('direct_conversations')
+        .select('*')
+        .or(`participant_1_id.eq.${currentUser.id},participant_2_id.eq.${currentUser.id}`);
+
+      if (findError) throw findError;
+
+      let conversation = convs?.find(c =>
+        (c.participant_1_id === currentUser.id && c.participant_2_id === selectedUser.id) ||
+        (c.participant_1_id === selectedUser.id && c.participant_2_id === currentUser.id)
+      );
+
+      if (!conversation) {
+        // Create new conversation
+        const { data: newConv, error: createError } = await supabase
+          .from('direct_conversations')
+          .insert({
+            participant_1_id: currentUser.id,
+            participant_2_id: selectedUser.id,
+            participant_1_email: currentUser.email,
+            participant_2_email: selectedUser.email,
+            last_message_content: message,
+            last_message_time: new Date().toISOString(),
+            last_message_sender_id: currentUser.id,
+            unread_count_p2: 1
+          })
+          .select()
+          .single();
+
+        if (createError) throw createError;
+        conversation = newConv;
+      }
+
+      const messageContent = message;
       const messageData = {
         sender_id: currentUser.id,
         sender_email: currentUser.email,
         sender_name: currentUser.full_name || currentUser.email,
-        sender_avatar: currentUser.avatar_url,
         recipient_id: selectedUser.id,
-        recipient_email: selectedUser.created_by,
+        recipient_email: selectedUser.email,
         recipient_name: selectedUser.display_name,
-        content: message,
-        conversation_id: conversationId,
+        content: messageContent,
+        conversation_id: conversation.id,
         is_read: false
       };
 
-      await base44.entities.DirectMessage.create(messageData);
+      await supabase.from('direct_messages').insert(messageData);
+
+      // Update conversation metadata if it existed
+      if (conversation.id) {
+        const isParticipant1 = conversation.participant_1_id === currentUser.id;
+        const otherUnreadField = isParticipant1 ? 'unread_count_p2' : 'unread_count_p1';
+
+        await supabase
+          .from('direct_conversations')
+          .update({
+            last_message_content: messageContent,
+            last_message_time: new Date().toISOString(),
+            last_message_sender_id: currentUser.id,
+            [otherUnreadField]: (conversation[otherUnreadField] || 0) + 1
+          })
+          .eq('id', conversation.id);
+      }
 
       return {
-        id: conversationId,
+        ...conversation,
         recipientId: selectedUser.id,
-        recipientEmail: selectedUser.created_by,
+        recipientEmail: selectedUser.email,
         recipientName: selectedUser.display_name,
         recipientAvatar: selectedUser.avatar_url
       };
@@ -151,14 +211,13 @@ export default function NewMessageModal({ isOpen, onClose, currentUser, onConver
                           transition={{ delay: idx * 0.05 }}
                           onClick={() => canMessage && setSelectedUser(profile)}
                           disabled={!canMessage}
-                          className={`w-full p-3 flex items-center gap-3 rounded-lg transition-all ${
-                            canMessage 
-                              ? 'hover:bg-purple-50 cursor-pointer' 
-                              : 'opacity-50 cursor-not-allowed'
-                          }`}
+                          className={`w-full p-3 flex items-center gap-3 rounded-lg transition-all ${canMessage
+                            ? 'hover:bg-purple-50 cursor-pointer'
+                            : 'opacity-50 cursor-not-allowed'
+                            }`}
                         >
                           {profile.avatar_url ? (
-                            <img 
+                            <img
                               src={profile.avatar_url}
                               alt={profile.display_name}
                               className="w-10 h-10 rounded-full object-cover border-2 border-purple-200"
@@ -191,7 +250,7 @@ export default function NewMessageModal({ isOpen, onClose, currentUser, onConver
               {/* Selected User */}
               <div className="flex items-center gap-3 p-3 bg-purple-50 rounded-lg mb-4">
                 {selectedUser.avatar_url ? (
-                  <img 
+                  <img
                     src={selectedUser.avatar_url}
                     alt={selectedUser.display_name}
                     className="w-10 h-10 rounded-full object-cover border-2 border-purple-300"

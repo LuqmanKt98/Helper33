@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -11,11 +12,22 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
 export default function NotificationSettings({ onClose }) {
+  const { user: authUser } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['user', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const [settings, setSettings] = useState(
@@ -42,9 +54,13 @@ export default function NotificationSettings({ onClose }) {
 
   const saveMutation = useMutation({
     mutationFn: async (newSettings) => {
-      return await base44.auth.updateMe({
-        womens_health_notifications: newSettings
-      });
+      if (!authUser) return;
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({ womens_health_notifications: newSettings })
+        .eq('id', authUser.id);
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user'] });
@@ -336,11 +352,10 @@ export default function NotificationSettings({ onClose }) {
         <CardContent className="space-y-3">
           <div
             onClick={() => toggleDeliveryMethod('push')}
-            className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-all ${
-              settings.delivery_method?.includes('push')
+            className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-all ${settings.delivery_method?.includes('push')
                 ? 'bg-purple-100 border-2 border-purple-400'
                 : 'bg-gray-50 border-2 border-gray-200'
-            }`}
+              }`}
           >
             <div className="flex items-center gap-3">
               <Smartphone className={`w-5 h-5 ${settings.delivery_method?.includes('push') ? 'text-purple-600' : 'text-gray-400'}`} />
@@ -356,11 +371,10 @@ export default function NotificationSettings({ onClose }) {
 
           <div
             onClick={() => toggleDeliveryMethod('sms')}
-            className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-all ${
-              settings.delivery_method?.includes('sms')
+            className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-all ${settings.delivery_method?.includes('sms')
                 ? 'bg-blue-100 border-2 border-blue-400'
                 : 'bg-gray-50 border-2 border-gray-200'
-            }`}
+              }`}
           >
             <div className="flex items-center gap-3">
               <MessageSquare className={`w-5 h-5 ${settings.delivery_method?.includes('sms') ? 'text-blue-600' : 'text-gray-400'}`} />
@@ -376,11 +390,10 @@ export default function NotificationSettings({ onClose }) {
 
           <div
             onClick={() => toggleDeliveryMethod('email')}
-            className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-all ${
-              settings.delivery_method?.includes('email')
+            className={`flex items-center justify-between p-4 rounded-lg cursor-pointer transition-all ${settings.delivery_method?.includes('email')
                 ? 'bg-pink-100 border-2 border-pink-400'
                 : 'bg-gray-50 border-2 border-gray-200'
-            }`}
+              }`}
           >
             <div className="flex items-center gap-3">
               <Mail className={`w-5 h-5 ${settings.delivery_method?.includes('email') ? 'text-pink-600' : 'text-gray-400'}`} />

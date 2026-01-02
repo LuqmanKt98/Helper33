@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,63 +36,102 @@ export default function DiscoverPeople() {
   const [sendingInviteTo, setSendingInviteTo] = useState(null);
   const queryClient = useQueryClient();
 
+  const { user: authUser } = useAuth();
+
   const { data: currentUser } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['currentUser', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: allProfiles = [] } = useQuery({
     queryKey: ['communityProfiles'],
-    queryFn: () => base44.entities.UserCommunityProfile.list('-last_active'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('full_name');
+
+      if (error) throw error;
+      return (data || []).map(p => ({
+        ...p,
+        display_name: p.full_name,
+        created_by: p.id
+      }));
+    },
     enabled: !!currentUser
   });
 
   const { data: myConnections = [] } = useQuery({
-    queryKey: ['myConnections'],
-    queryFn: () => base44.entities.ContactConnection.list(),
+    queryKey: ['myConnections', currentUser?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('friend_requests')
+        .select('*')
+        .or(`requester_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`);
+
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!currentUser
   });
 
   const { data: receivedRequests = [] } = useQuery({
-    queryKey: ['receivedRequests'],
+    queryKey: ['receivedRequests', currentUser?.id],
     queryFn: async () => {
-      const requests = await base44.entities.ContactConnection.filter({
-        other_user_email: currentUser.email,
-        status: 'pending'
-      });
-      return requests;
+      if (!currentUser) return [];
+      const { data, error } = await supabase
+        .from('friend_requests')
+        .select(`
+          *,
+          requester:requester_id (id, full_name, avatar_url)
+        `)
+        .eq('receiver_id', currentUser.id)
+        .eq('status', 'pending');
+
+      if (error) throw error;
+      return data.map(r => ({
+        ...r,
+        other_user_name: r.requester?.full_name || 'User',
+        other_user_avatar: r.requester?.avatar_url
+      })) || [];
     },
     enabled: !!currentUser
   });
 
   const sendConnectionMutation = useMutation({
     mutationFn: async ({ otherUser, message }) => {
-      // Create connection from my side
-      const connection = await base44.entities.ContactConnection.create({
-        connection_type: 'search_discovery',
-        other_user_email: otherUser.email,
-        other_user_name: otherUser.display_name,
-        other_user_emoji: otherUser.display_emoji,
-        other_user_is_anonymous: otherUser.is_fully_anonymous,
-        status: 'pending',
-        invite_message: message,
-        can_view_profile: !otherUser.is_fully_anonymous && !currentUser?.community_privacy?.is_fully_anonymous
-      });
+      const { error } = await supabase
+        .from('friend_requests')
+        .insert({
+          requester_id: currentUser.id,
+          receiver_id: otherUser.id,
+          status: 'pending'
+        });
 
-      // Create notification for other user
-      await base44.entities.Notification.create({
-        recipient_email: otherUser.email,
-        notification_type: 'connection_request',
-        title: 'New Connection Request',
-        message: `${currentUser?.preferred_name || currentUser?.full_name} wants to connect with you`,
-        action_url: '/Community#discover',
-        is_read: false
-      });
+      if (error) throw error;
 
-      return connection;
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: otherUser.id,
+          type: 'connection_request',
+          title: 'New Connection Request',
+          content: `${currentUser?.full_name} wants to connect with you`,
+          is_read: false
+        });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['myConnections']);
+      queryClient.invalidateQueries({ queryKey: ['myConnections'] });
       setSendingInviteTo(null);
       setInviteMessage('');
       toast.success('Connection request sent! ✨');
@@ -100,102 +140,94 @@ export default function DiscoverPeople() {
 
   const acceptConnectionMutation = useMutation({
     mutationFn: async (request) => {
-      // Update the received request to accepted
-      await base44.entities.ContactConnection.update(request.id, {
-        status: 'accepted',
-        accepted_at: new Date().toISOString()
-      });
+      const { error: updateError } = await supabase
+        .from('friend_requests')
+        .update({
+          status: 'accepted',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', request.id);
 
-      // Create reciprocal connection
-      await base44.entities.ContactConnection.create({
-        connection_type: request.connection_type,
-        other_user_email: request.created_by,
-        other_user_name: request.other_user_name,
-        other_user_emoji: request.other_user_emoji,
-        other_user_is_anonymous: request.other_user_is_anonymous,
-        status: 'accepted',
-        accepted_at: new Date().toISOString(),
-        can_view_profile: request.can_view_profile
-      });
+      if (updateError) throw updateError;
 
-      // Create conversation for messaging
-      const myProfile = allProfiles.find(p => p.created_by === currentUser.email);
-      await base44.entities.Conversation.create({
-        participant_emails: [currentUser.email, request.created_by],
-        participant_names: [
-          myProfile?.display_name || currentUser.preferred_name || currentUser.full_name,
-          request.other_user_name
-        ],
-        participant_avatars: [myProfile?.avatar_url || '', ''],
-        conversation_type: 'direct'
-      });
+      // Check if conversation exists
+      const { data: existingConvs } = await supabase
+        .from('direct_conversations')
+        .select('*')
+        .or(`and(participant_1_id.eq.${currentUser.id},participant_2_id.eq.${request.requester_id}),and(participant_1_id.eq.${request.requester_id},participant_2_id.eq.${currentUser.id})`);
 
-      // Notify the requester
-      await base44.entities.Notification.create({
-        recipient_email: request.created_by,
-        notification_type: 'connection_accepted',
-        title: 'Connection Accepted!',
-        message: `${currentUser?.preferred_name || currentUser?.full_name} accepted your connection request`,
-        action_url: '/Messages',
-        is_read: false
-      });
+      if (!existingConvs || existingConvs.length === 0) {
+        await supabase
+          .from('direct_conversations')
+          .insert({
+            participant_1_id: currentUser.id,
+            participant_2_id: request.requester_id,
+            last_message_content: 'Connected! Start chatting...',
+            last_message_time: new Date().toISOString()
+          });
+      }
 
-      return request;
+      await supabase
+        .from('notifications')
+        .insert({
+          user_id: request.requester_id,
+          type: 'connection_accepted',
+          title: 'Connection Accepted!',
+          content: `${currentUser?.full_name} accepted your connection request`,
+          is_read: false
+        });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['myConnections']);
-      queryClient.invalidateQueries(['receivedRequests']);
-      queryClient.invalidateQueries(['conversations']);
+      queryClient.invalidateQueries({ queryKey: ['myConnections'] });
+      queryClient.invalidateQueries({ queryKey: ['receivedRequests'] });
+      queryClient.invalidateQueries({ queryKey: ['allDirectConversations'] });
       toast.success('Connection accepted! 🎉 You can now message each other!');
     }
   });
 
   const rejectConnectionMutation = useMutation({
-    mutationFn: (connectionId) => base44.entities.ContactConnection.delete(connectionId),
+    mutationFn: async (connectionId) => {
+      await supabase
+        .from('friend_requests')
+        .delete()
+        .eq('id', connectionId);
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries(['receivedRequests']);
+      queryClient.invalidateQueries({ queryKey: ['receivedRequests'] });
       toast.info('Request declined');
     }
   });
 
   const startConversationMutation = useMutation({
-    mutationFn: async (otherUserEmail) => {
-      const connection = myConnections.find(c => c.other_user_email === otherUserEmail && c.status === 'accepted');
-      if (!connection) {
-        throw new Error('Not connected with this user');
+    mutationFn: async (otherUserId) => {
+      // Check if conversation exists
+      const { data: existingConvs } = await supabase
+        .from('direct_conversations')
+        .select('*')
+        .or(`and(participant_1_id.eq.${currentUser.id},participant_2_id.eq.${otherUserId}),and(participant_1_id.eq.${otherUserId},participant_2_id.eq.${currentUser.id})`);
+
+      if (existingConvs && existingConvs.length > 0) {
+        return existingConvs[0];
       }
 
-      // Check if conversation already exists
-      const existingConvs = await base44.entities.Conversation.filter({
-        participant_emails: { $contains: currentUser.email }
-      });
+      const { data, error } = await supabase
+        .from('direct_conversations')
+        .insert({
+          participant_1_id: currentUser.id,
+          participant_2_id: otherUserId,
+          last_message_content: 'Connected! Start chatting...',
+          last_message_time: new Date().toISOString()
+        })
+        .select()
+        .single();
 
-      const existing = existingConvs.find(conv => 
-        conv.participant_emails.includes(otherUserEmail)
-      );
-
-      if (existing) {
-        return existing;
-      }
-
-      // Create new conversation
-      const myProfile = allProfiles.find(p => p.created_by === currentUser.email);
-      const otherProfile = allProfiles.find(p => p.created_by === otherUserEmail);
-
-      return await base44.entities.Conversation.create({
-        participant_emails: [currentUser.email, otherUserEmail],
-        participant_names: [
-          myProfile?.display_name || currentUser.preferred_name || currentUser.full_name,
-          otherProfile?.display_name || connection.other_user_name
-        ],
-        participant_avatars: [myProfile?.avatar_url || '', otherProfile?.avatar_url || ''],
-        conversation_type: 'direct'
-      });
+      if (error) throw error;
+      return data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['conversations']);
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['allDirectConversations'] });
       toast.success('Opening conversation! 💬');
-      window.location.href = '/Messages';
+      window.location.href = `/Messages?conversation=${data.id}`;
     }
   });
 
@@ -205,17 +237,19 @@ export default function DiscoverPeople() {
       return;
     }
 
-    const users = await base44.entities.User.filter({ invite_code: inviteCode.trim().toUpperCase() });
-    
-    if (users.length === 0) {
+    const { data: targetProfile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('invite_code', inviteCode.trim().toUpperCase())
+      .single();
+
+    if (profileError || !targetProfile) {
       toast.error('Invalid invite code');
       return;
     }
 
-    const targetUser = users[0];
-    
     const existingConnection = myConnections.find(
-      c => c.other_user_email === targetUser.email
+      c => c.requester_id === targetProfile.id || c.receiver_id === targetProfile.id
     );
 
     if (existingConnection) {
@@ -223,23 +257,10 @@ export default function DiscoverPeople() {
       return;
     }
 
-    const profiles = await base44.entities.UserCommunityProfile.filter({
-      created_by: targetUser.email
-    });
-
-    if (profiles.length === 0) {
-      toast.error('User hasn\'t set up their community profile yet');
-      return;
-    }
-
-    const profile = profiles[0];
-
     await sendConnectionMutation.mutateAsync({
       otherUser: {
-        email: targetUser.email,
-        display_name: profile.display_name,
-        display_emoji: profile.display_emoji,
-        is_fully_anonymous: profile.is_fully_anonymous
+        id: targetProfile.id,
+        full_name: targetProfile.full_name
       },
       message: 'Connected via invite code!'
     });
@@ -247,33 +268,33 @@ export default function DiscoverPeople() {
 
   const canViewProfile = (profile) => {
     const myPrivacy = currentUser.community_privacy || {};
-    
+
     if (myPrivacy.is_fully_anonymous && !profile.is_fully_anonymous) {
       return false;
     }
-    
+
     if (!myPrivacy.is_fully_anonymous && !profile.is_fully_anonymous) {
       return true;
     }
-    
+
     if (profile.is_fully_anonymous) {
       return true;
     }
-    
+
     return false;
   };
 
   const discoverableProfiles = allProfiles.filter(profile => {
     if (profile.created_by === currentUser?.email) return false;
     if (profile.visibility_level === 'invisible' || !profile.can_be_discovered) return false;
-    
+
     if (profile.discoverable_by_contacts_only) {
       const isContact = myConnections.some(
         c => c.other_user_email === profile.created_by && c.status === 'accepted'
       );
       if (!isContact) return false;
     }
-    
+
     if (searchQuery) {
       const search = searchQuery.toLowerCase();
       return (
@@ -282,14 +303,14 @@ export default function DiscoverPeople() {
         profile.custom_tags?.some(t => t.toLowerCase().includes(search))
       );
     }
-    
+
     if (selectedFilters.length > 0) {
-      return selectedFilters.some(filter => 
+      return selectedFilters.some(filter =>
         profile.goal_categories?.includes(filter) ||
         profile.support_preferences?.includes(filter)
       );
     }
-    
+
     return true;
   });
 
@@ -424,7 +445,7 @@ export default function DiscoverPeople() {
               className="pl-10"
             />
           </div>
-          
+
           <div className="flex items-center gap-2 mb-3">
             <Filter className="w-4 h-4 text-purple-600" />
             <p className="text-sm font-semibold text-gray-700">Filter by:</p>
@@ -468,7 +489,7 @@ export default function DiscoverPeople() {
               <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-gray-700 mb-2">No Users Found</h3>
               <p className="text-gray-500 max-w-md mx-auto">
-                {amAnonymous 
+                {amAnonymous
                   ? 'No anonymous users discoverable. Connect via invite code instead.'
                   : 'Try different filters or invite friends to Helper33!'
                 }
@@ -493,11 +514,10 @@ export default function DiscoverPeople() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.05 }}
               >
-                <Card className={`border-2 hover:shadow-lg transition-all ${
-                  profile.is_fully_anonymous 
-                    ? 'border-blue-300 bg-blue-50/30' 
-                    : 'border-purple-300 bg-purple-50/30'
-                }`}>
+                <Card className={`border-2 hover:shadow-lg transition-all ${profile.is_fully_anonymous
+                  ? 'border-blue-300 bg-blue-50/30'
+                  : 'border-purple-300 bg-purple-50/30'
+                  }`}>
                   <CardContent className="p-6">
                     <div className="flex items-start gap-4">
                       <motion.div
