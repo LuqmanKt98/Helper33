@@ -1,0 +1,592 @@
+css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+    
+    /* Sky Drift Sanctuary Theme Colors (preserved) */
+    --sky-azure: 200 100% 70%;
+    --sky-powder: 210 60% 85%;
+    --sky-cream: 40 100% 95%;
+    --sky-white: 0 0% 100%;
+    --sky-yellow: 45 100% 90%;
+    
+    /* Motion Tokens (preserved) */
+    --e-fast: 150ms;
+    --e-base: 220ms;
+    --e-slow: 320ms;
+    --e-curve: cubic-bezier(.22,.61,.36,1);
+    --stagger-delay: 80ms;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+/* Sky Drift Sanctuary Global Background */
+body {
+  background: linear-gradient(to bottom, #87CEEB 0%, #B0D4E3 30%, #E0E7F1 60%, #FFF8E7 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "kern" 1;
+    font-kerning: normal;
+  }
+
+  h1, h2, h3, h4, h5, h6, p, span, div, button, label, input, textarea {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* Improve rendering for cards and containers */
+.card, .rounded {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Better clarity for backdrop blur elements */
+[class*="backdrop-blur"] {
+  -webkit-font-smoothing: antialiased;
+  will-change: auto;
+}
+
+/* Ensure text stays crisp during animations */
+[class*="motion"] {
+  -webkit-font-smoothing: antialiased;
+  transform: translateZ(0);
+}
+
+/* Global class for reduced motion, replaces @media (prefers-reduced-motion) block */
+.reduce-motion * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Therapeutic Animations */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cloud-drift {
+  0% {
+    transform: translateX(-10vw) translateY(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateX(110vw) translateY(-20px);
+    opacity: 0;
+  }
+}
+
+@keyframes camera-drift {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.01);
+  }
+}
+
+@keyframes balloon-float {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-8px) rotate(1deg);
+  }
+  50% {
+    transform: translateY(-15px) rotate(0deg);
+  }
+  75% {
+    transform: translateY(-8px) rotate(-1deg);
+  }
+}
+
+@keyframes light-ray {
+  0% {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.8);
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(100px) scale(1.2);
+  }
+}
+
+@keyframes bird-glide {
+  0% {
+    transform: translateX(-100px) translateY(0) scale(1);
+  }
+  50% {
+    transform: translateX(50vw) translateY(-30px) scale(1.1);
+  }
+  100% {
+    transform: translateX(110vw) translateY(0) scale(1);
+  }
+}
+
+@keyframes sky-shimmer {
+  0%, 100% {
+    box-shadow: 0 8px 32px rgba(135, 206, 235, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.6);
+  }
+  50% {
+    box-shadow: 0 12px 40px rgba(135, 206, 235, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.8);
+  }
+}
+
+@keyframes weightless-drift {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+/* Sky Drift Sanctuary Card Styles */
+.sky-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 8px 32px rgba(135, 206, 235, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.6);
+  border-radius: 1.5rem;
+  transition: all var(--e-base) var(--e-curve);
+}
+
+.sky-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 16px 48px rgba(135, 206, 235, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+/* Glass Morphism Buttons */
+.sky-button {
+  background: linear-gradient(135deg, #87CEEB, #B0D4E3, #FFF8E7);
+  border: none;
+  border-radius: 1rem;
+  box-shadow: 0 8px 24px rgba(135, 206, 235, 0.3);
+  transition: all var(--e-base) var(--e-curve);
+  position: relative;
+  overflow: hidden;
+}
+
+.sky-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  transition: left 0.6s;
+}
+
+.sky-button:hover::before {
+  left: 100%;
+}
+
+.sky-button:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(135, 206, 235, 0.4);
+}
+
+/* Frosted Input Fields */
+.sky-input {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(135, 206, 235, 0.3);
+  border-radius: 1rem;
+  transition: all var(--e-base) var(--e-curve);
+}
+
+.sky-input:focus {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(135, 206, 235, 0.5);
+  box-shadow: 0 0 0 3px rgba(135, 206, 235, 0.1);
+  outline: none;
+}
+
+/* Cloud Container */
+.cloud-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.cloud {
+  position: absolute;
+  animation: cloud-drift 20s linear infinite;
+  will-change: transform, opacity;
+}
+
+/* Light Rays */
+.light-ray {
+  position: absolute;
+  width: 2px;
+  height: 100px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0));
+  animation: light-ray 4s ease-in-out infinite;
+}
+
+/* Birds */
+.bird {
+  position: absolute;
+  animation: bird-glide 25s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Balloon Float Effect */
+.balloon-float {
+  animation: balloon-float 6s ease-in-out infinite;
+}
+
+/* Camera Drift Effect */
+.camera-drift {
+  animation: camera-drift 8s ease-in-out infinite;
+}
+
+/* Sky Shimmer Effect */
+.sky-shimmer {
+  animation: sky-shimmer 3s ease-in-out infinite;
+}
+
+/* Weightless Drift Animation */
+.weightless-drift {
+  animation: weightless-drift 5s ease-in-out infinite;
+}
+
+/* Horizon Line */
+.horizon-line {
+  position: fixed;
+  bottom: 20%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(135, 206, 235, 0.2), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Sky Sanctuary Overlay */
+.sky-sanctuary {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle at 50% 30%, rgba(135, 206, 235, 0.1), transparent 60%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Therapeutic Motion Classes */
+.animate-fade-in-up {
+  animation: fade-in-up var(--e-base) var(--e-curve);
+}
+
+.animate-cloud-drift {
+  animation: cloud-drift 20s linear infinite;
+}
+
+.animate-camera-drift {
+  animation: camera-drift 8s ease-in-out infinite;
+}
+
+.animate-balloon-float {
+  animation: balloon-float 6s ease-in-out infinite;
+}
+
+.animate-light-ray {
+  animation: light-ray 4s ease-in-out infinite;
+}
+
+.animate-bird-glide {
+  animation: bird-glide 25s ease-in-out infinite;
+}
+
+.animate-sky-shimmer {
+  animation: sky-shimmer 3s ease-in-out infinite;
+}
+
+.animate-weightless-drift {
+  animation: weightless-drift 5s ease-in-out infinite;
+}
+
+/* Sky Drift Sanctuary Utilities */
+.bg-sky-gradient {
+  background: linear-gradient(135deg, #87CEEB 0%, #B0D4E3 50%, #FFF8E7 100%);
+}
+
+.bg-sky-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.border-sky {
+  border: 1px solid rgba(135, 206, 235, 0.3);
+}
+
+.shadow-sky {
+  box-shadow: 0 8px 32px rgba(135, 206, 235, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.shadow-sky-lg {
+  box-shadow: 0 16px 48px rgba(135, 206, 235, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+.text-sky-azure {
+  color: #87CEEB;
+}
+
+.text-sky-powder {
+  color: #B0D4E3;
+}
+
+/* Scrollbar Styling - Sky Theme */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #87CEEB, #B0D4E3);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #5DADE2, #87CEEB);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* RTL (Right-to-Left) Support for Arabic and other RTL languages */
+.rtl {
+  direction: rtl;
+}
+
+.ltr {
+  direction: ltr;
+}
+
+/* RTL-specific utility overrides */
+[dir="rtl"] .text-left {
+  text-align: right;
+}
+
+[dir="rtl"] .text-right {
+  text-align: left;
+}
+
+[dir="rtl"] .ml-auto {
+  margin-left: unset;
+  margin-right: auto;
+}
+
+[dir="rtl"] .mr-auto {
+  margin-right: unset;
+  margin-left: auto;
+}
+
+[dir="rtl"] .pl-4 {
+  padding-left: unset;
+  padding-right: 1rem;
+}
+
+[dir="rtl"] .pr-4 {
+  padding-right: unset;
+  padding-left: 1rem;
+}
+
+.rtl .justify-end {
+  justify-content: flex-start;
+}
+
+.rtl .justify-start {
+  justify-content: flex-end;
+}
+
+/* Fix positioning for RTL */
+.rtl .right-0 {
+  right: unset;
+  left: 0;
+}
+
+.rtl .left-0 {
+  left: unset;
+  right: 0;
+}
+
+.rtl .right-6 {
+  right: unset;
+  left: 1.5rem;
+}
+
+.rtl .left-6 {
+  left: unset;
+  right: 1.5rem;
+}
+
+/* Flex direction adjustments for RTL */
+.rtl .flex-row {
+  flex-direction: row-reverse;
+}
+
+.rtl .space-x-2 > * + * {
+  margin-left: unset;
+  margin-right: 0.5rem;
+}
+
+.rtl .space-x-3 > * + * {
+  margin-left: unset;
+  margin-right: 0.75rem;
+}
+
+.rtl .space-x-4 > * + * {
+  margin-left: unset;
+  margin-right: 1rem;
+}
+
+/* Therapeutic spacing - Preserved */
+.space-therapeutic {
+  padding: 1.5rem;
+}
+
+/* Soft edges - Preserved */
+.rounded-therapeutic {
+  border-radius: var(--radius);
+}
+
+/* Comfort backgrounds - Preserved */
+.bg-comfort {
+  background: linear-gradient(
+    135deg,
+    hsl(var(--background)) 0%,
+    hsl(var(--card)) 100%
+  );
+}
+
+.bg-ambient {
+  background: radial-gradient(
+    circle at 20% 50%,
+    hsla(var(--primary), 0.05) 0%,
+    transparent 50%
+  );
+}
+
+/* Safe interaction zones - Preserved */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Therapeutic text - Preserved */
+.text-therapeutic {
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+}
+
+/* Focus states - Preserved */
+.focus-therapeutic:focus {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+@layer utilities {
+  .crisp-text {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+}
