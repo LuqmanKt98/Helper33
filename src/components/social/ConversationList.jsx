@@ -94,7 +94,8 @@ export default function ConversationList() {
 
   // Send message mutation
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ conversationId, content }) => {
+    mutationFn: async (params) => {
+      const { conversationId, content } = params;
       const conversation = conversations.find(c => c.id === conversationId);
       const recipientId = conversation.participant_1_id === user.id
         ? conversation.participant_2_id
@@ -130,8 +131,8 @@ export default function ConversationList() {
         .eq('id', conversationId);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['conversations']);
-      queryClient.invalidateQueries(['messages', selectedConversation?.id]);
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['messages', selectedConversation?.id] });
       setMessageText('');
     },
     onError: (error) => {
@@ -223,8 +224,8 @@ export default function ConversationList() {
                   <Card
                     onClick={() => setSelectedConversation(conversation)}
                     className={`cursor-pointer transition-all ${isSelected
-                        ? 'border-2 border-purple-500 bg-purple-50'
-                        : 'hover:shadow-md'
+                      ? 'border-2 border-purple-500 bg-purple-50'
+                      : 'hover:shadow-md'
                       }`}
                   >
                     <CardContent className="p-3">
@@ -300,8 +301,8 @@ export default function ConversationList() {
                     >
                       <div
                         className={`max-w-[70%] rounded-lg p-3 ${isMine
-                            ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
-                            : 'bg-gray-100 text-gray-900'
+                          ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
+                          : 'bg-gray-100 text-gray-900'
                           }`}
                       >
                         <p className="text-sm whitespace-pre-wrap">{message.content}</p>
