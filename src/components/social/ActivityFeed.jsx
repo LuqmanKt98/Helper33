@@ -1,74 +1,46 @@
-
 import React, { useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
 import {
-  Trophy,
-  Flame,
-  Star,
-  Award,
-  TrendingUp,
+  Heart,
   MessageCircle,
+  Share2,
+  Trophy,
+  Target,
+  Flame,
   Sparkles,
+  ThumbsUp,
+  Send,
   Loader2,
-  CheckCircle, // Added
-  Target, // Added
-  BookOpen, // Added
-  Calendar // Added
+  TrendingUp
 } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { format } from 'date-fns';
+import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 
-const activityIcons = {
-  badge_earned: Trophy,
-  challenge_completed: CheckCircle, // Modified
-  level_up: TrendingUp,
-  streak_milestone: Flame,
-  perfect_day: Star,
-  wellness_plan_generated: Target, // Modified
-  journal_milestone: BookOpen, // Modified
-  event_attendance: Calendar, // Added
-  event_badge_earned: Award // Added
-};
+const REACTION_TYPES = [
+  { type: 'fire', emoji: '🔥', label: 'Fire' },
+  { type: 'heart', emoji: '❤️', label: 'Love' },
+  { type: 'celebrate', emoji: '🎉', label: 'Celebrate' },
+  { type: 'support', emoji: '💪', label: 'Support' },
+  { type: 'clap', emoji: '👏', label: 'Applause' }
+];
 
-const activityColors = {
-  badge_earned: 'from-yellow-500 to-amber-500',
-  challenge_completed: 'from-green-500 to-emerald-500',
-  level_up: 'from-blue-500 to-cyan-500',
-  streak_milestone: 'from-orange-500 to-red-500',
-  perfect_day: 'from-purple-500 to-pink-500',
-  wellness_plan_generated: 'from-indigo-500 to-purple-500',
-  journal_milestone: 'from-rose-500 to-pink-500',
-  event_attendance: 'from-purple-500 to-pink-500',
-  event_badge_earned: 'from-amber-500 to-orange-500'
-};
-
-const cheerEmojis = {
-  fire: '🔥',
-  heart: '❤️',
-  clap: '👏',
-  trophy: '🏆',
-  star: '⭐',
-  celebrate: '🎉',
-  strong: '💪',
-  wow: '😮'
-};
-
-export default function ActivityFeed({ friends }) {
-  const [commentingOn, setCommentingOn] = useState(null);
+export default function ActivityFeed({ friends = [] }) {
+  const [selectedActivity, setSelectedActivity] = useState(null);
   const [commentText, setCommentText] = useState('');
-
   const queryClient = useQueryClient();
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
+    queryKey: ['user', authUser?.id],
     queryFn: async () => {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) return null;
       const { data, error } = await supabase
         .from('profiles')
@@ -77,102 +49,99 @@ export default function ActivityFeed({ friends }) {
         .single();
       if (error) throw error;
       return data;
-    }
+    },
+    enabled: !!authUser
   });
 
-  const friendEmails = friends.map(f => f.email);
-
+  // Fetch friend activities
   const { data: activities = [], isLoading } = useQuery({
-    queryKey: ['friend-activities', friendEmails],
+    queryKey: ['friendActivities', friends],
     queryFn: async () => {
-      if (friendEmails.length === 0) return [];
+      if (!friends || friends.length === 0) return [];
+
+      const friendIds = friends.map(f => f.id);
 
       const { data, error } = await supabase
         .from('friend_activities')
         .select('*')
+        .in('user_id', friendIds)
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
-
-      return data.filter(activity =>
-        friendEmails.includes(activity.user_email) || activity.user_email === user?.email
-      );
+      return data || [];
     },
-    enabled: !!user && friendEmails.length > 0
+    enabled: friends && friends.length > 0
   });
 
-  const { data: myReactions = [] } = useQuery({
-    queryKey: ['my-cheer-reactions', user?.id],
+  // Fetch reactions for activities
+  const { data: reactions = [] } = useQuery({
+    queryKey: ['activityReactions'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('cheer_reactions')
-        .select('*')
-        .eq('cheerer_id', user.id);
+        .select('*');
       if (error) throw error;
       return data || [];
-    },
-    enabled: !!user
+    }
   });
 
-  const { data: allComments = [] } = useQuery({
-    queryKey: ['activity-comments'],
+  // Fetch comments for activities
+  const { data: comments = [] } = useQuery({
+    queryKey: ['activityComments'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('activity_comments')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: true });
       if (error) throw error;
       return data || [];
     }
   });
 
-  const cheerMutation = useMutation({
-    mutationFn: async ({ activityId, activityOwnerId, reactionType }) => {
-      // Check if already cheered
-      const { data: existing, error: fetchError } = await supabase
+  // Add reaction mutation
+  const addReactionMutation = useMutation({
+    mutationFn: async (params) => {
+      const { activityId, reactionType } = params;
+      const activity = activities.find(a => a.id === activityId);
+
+      const { error } = await supabase
         .from('cheer_reactions')
-        .select('*')
-        .eq('activity_id', activityId)
-        .eq('cheerer_id', user.id);
+        .insert({
+          activity_id: activityId,
+          cheerer_id: user.id,
+          cheerer_email: user.email,
+          cheerer_name: user.full_name,
+          cheerer_avatar: user.avatar_url,
+          recipient_email: activity.user_id,
+          reaction_type: reactionType
+        });
 
-      if (fetchError) throw fetchError;
+      if (error) throw error;
 
-      if (existing && existing.length > 0) {
-        // Update existing cheer
-        const { error: updateError } = await supabase
-          .from('cheer_reactions')
-          .update({
-            reaction_type: reactionType
-          })
-          .eq('id', existing[0].id);
-
-        if (updateError) throw updateError;
-      } else {
-        const { error: createError } = await supabase
-          .from('cheer_reactions')
-          .insert({
-            activity_id: activityId,
-            cheerer_id: user.id,
-            cheerer_email: user.email,
-            cheerer_name: user.full_name,
-            cheerer_avatar: user.avatar_url,
-            recipient_email: activityOwnerId,
-            reaction_type: reactionType
-          });
-
-        if (createError) throw createError;
-      }
+      // Update activity cheer count
+      await supabase
+        .from('friend_activities')
+        .update({ cheer_count: (activity.cheer_count || 0) + 1 })
+        .eq('id', activityId);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['friend-activities']);
-      queryClient.invalidateQueries(['my-cheer-reactions']);
-      toast.success('Cheer sent! 🎉');
+      queryClient.invalidateQueries({ queryKey: ['friendActivities'] });
+      queryClient.invalidateQueries({ queryKey: ['activityReactions'] });
+      toast.success('Reaction added! 🎉');
+    },
+    onError: (error) => {
+      toast.error('Failed to add reaction');
+      console.error('Reaction error:', error);
     }
   });
 
-  const commentMutation = useMutation({
-    mutationFn: async ({ activityId }) => {
+  // Add comment mutation
+  const addCommentMutation = useMutation({
+    mutationFn: async (params) => {
+      const { activityId, comment } = params;
+      const activity = activities.find(a => a.id === activityId);
+
       const { error } = await supabase
         .from('activity_comments')
         .insert({
@@ -181,53 +150,122 @@ export default function ActivityFeed({ friends }) {
           commenter_email: user.email,
           commenter_name: user.full_name,
           commenter_avatar: user.avatar_url,
-          comment_text: commentText
+          comment_text: comment
         });
+
       if (error) throw error;
+
+      // Update activity comment count
+      await supabase
+        .from('friend_activities')
+        .update({ comment_count: (activity.comment_count || 0) + 1 })
+        .eq('id', activityId);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['activity-comments']);
-      queryClient.invalidateQueries(['friend-activities']);
-      setCommentingOn(null);
+      queryClient.invalidateQueries({ queryKey: ['friendActivities'] });
+      queryClient.invalidateQueries({ queryKey: ['activityComments'] });
       setCommentText('');
-      toast.success('Comment posted!');
+      setSelectedActivity(null);
+      toast.success('Comment added! 💬');
+    },
+    onError: (error) => {
+      toast.error('Failed to add comment');
+      console.error('Comment error:', error);
     }
   });
 
-  if (friendEmails.length === 0) {
+  const handleReaction = (activityId, reactionType) => {
+    if (!user) {
+      toast.error('Please log in to react');
+      return;
+    }
+    addReactionMutation.mutate({ activityId, reactionType });
+  };
+
+  const handleComment = (activityId) => {
+    if (!user) {
+      toast.error('Please log in to comment');
+      return;
+    }
+    if (!commentText.trim()) {
+      toast.error('Please enter a comment');
+      return;
+    }
+    addCommentMutation.mutate({ activityId, comment: commentText });
+  };
+
+  const getActivityIcon = (type) => {
+    switch (type) {
+      case 'badge_earned':
+        return <Trophy className="w-5 h-5 text-yellow-600" />;
+      case 'challenge_completed':
+        return <Target className="w-5 h-5 text-green-600" />;
+      case 'streak_milestone':
+        return <Flame className="w-5 h-5 text-orange-600" />;
+      case 'level_up':
+        return <TrendingUp className="w-5 h-5 text-purple-600" />;
+      default:
+        return <Sparkles className="w-5 h-5 text-blue-600" />;
+    }
+  };
+
+  const getActivityReactions = (activityId) => {
+    return reactions.filter(r => r.activity_id === activityId);
+  };
+
+  const getActivityComments = (activityId) => {
+    return comments.filter(c => c.activity_id === activityId);
+  };
+
+  if (isLoading) {
     return (
-      <Card className="bg-white/80 backdrop-blur-sm">
+      <Card>
         <CardContent className="p-12 text-center">
-          <TrendingUp className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-900 mb-2">
-            Connect with Friends First
-          </h3>
-          <p className="text-gray-600 mb-4">
-            Add friends to see their amazing achievements here!
-          </p>
-          <Button onClick={() => { }} className="bg-purple-600">
-            Find Friends
-          </Button>
+          <Loader2 className="w-8 h-8 animate-spin text-purple-600 mx-auto mb-4" />
+          <p className="text-gray-600">Loading activity feed...</p>
         </CardContent>
       </Card>
     );
   }
 
-  if (isLoading) {
+  if (!friends || friends.length === 0) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 text-purple-600 animate-spin" />
-      </div>
+      <Card className="bg-gradient-to-br from-purple-50 to-pink-50">
+        <CardContent className="p-12 text-center">
+          <Heart className="w-16 h-16 text-purple-400 mx-auto mb-4" />
+          <h3 className="text-xl font-bold text-gray-900 mb-2">
+            Connect with Friends
+          </h3>
+          <p className="text-gray-600">
+            Add friends to see their achievements and celebrate together!
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (activities.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-12 text-center">
+          <Sparkles className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-xl font-bold text-gray-900 mb-2">
+            No Recent Activity
+          </h3>
+          <p className="text-gray-600">
+            Your friends haven't shared any achievements yet. Check back soon!
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
     <div className="space-y-4">
       {activities.map((activity, idx) => {
-        const Icon = activityIcons[activity.activity_type] || Trophy;
-        const activityComments = allComments.filter(c => c.activity_id === activity.id);
-        const activityCheers = myReactions.filter(r => r.activity_id === activity.id);
-        const myCheer = activityCheers[0];
+        const activityReactions = getActivityReactions(activity.id);
+        const activityComments = getActivityComments(activity.id);
+        const userReaction = activityReactions.find(r => r.cheerer_id === user?.id);
 
         return (
           <motion.div
@@ -236,155 +274,161 @@ export default function ActivityFeed({ friends }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.05 }}
           >
-            <Card className="bg-white/90 backdrop-blur-sm border-2 border-purple-200 hover:shadow-xl transition-all">
-              <CardContent className="p-5">
+            <Card className="hover:shadow-lg transition-all">
+              <CardContent className="p-6">
+                {/* Activity Header */}
                 <div className="flex items-start gap-4 mb-4">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold flex-shrink-0">
-                    {activity.user_avatar ? (
-                      <img src={activity.user_avatar} alt={activity.user_name} className="w-full h-full rounded-full object-cover" />
-                    ) : (
-                      activity.user_name?.charAt(0) || 'U'
-                    )}
-                  </div>
+                  {activity.user_avatar ? (
+                    <img
+                      src={activity.user_avatar}
+                      alt={activity.user_name}
+                      className="w-12 h-12 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold">
+                      {activity.user_name?.[0] || 'U'}
+                    </div>
+                  )}
 
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <p className="font-bold text-gray-900">{activity.user_name}</p>
-                      <Icon className="w-4 h-4 text-purple-600" />
+                      <h4 className="font-bold text-gray-900">{activity.user_name}</h4>
+                      <Badge variant="outline" className="text-xs">
+                        {getActivityIcon(activity.activity_type)}
+                        <span className="ml-1">{activity.activity_type.replace(/_/g, ' ')}</span>
+                      </Badge>
                     </div>
-                    <p className="text-sm text-gray-600 mb-2">
-                      {activity.achievement_description}
+                    <p className="text-sm text-gray-500">
+                      {format(new Date(activity.created_at), 'MMM d, h:mm a')}
                     </p>
+                  </div>
+                </div>
 
-                    {/* Achievement Card */}
-                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-3 border-2 border-purple-300 mb-3">
-                      <div className="flex items-center gap-3">
-                        {activity.achievement_data?.badge_icon && (
-                          <div className="text-3xl">{activity.achievement_data.badge_icon}</div>
-                        )}
-                        <div>
-                          <p className="font-bold text-gray-900">{activity.achievement_title}</p>
-                          {activity.achievement_data?.badge_tier && (
-                            <Badge className={`bg-gradient-to-r ${activityColors[activity.activity_type] || 'from-purple-600 to-pink-600'} text-xs mt-1`}>
-                              {activity.achievement_data.badge_tier.toUpperCase()}
-                            </Badge>
-                          )}
-                          {activity.achievement_data?.points_earned > 0 && (
-                            <p className="text-xs text-purple-700 mt-1">
-                              +{activity.achievement_data.points_earned} points
-                            </p>
-                          )}
+                {/* Activity Content */}
+                <div className="mb-4">
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">
+                    {activity.achievement_title}
+                  </h3>
+                  <p className="text-gray-700">{activity.achievement_description}</p>
+
+                  {activity.achievement_data && Object.keys(activity.achievement_data).length > 0 && (
+                    <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                      {Object.entries(activity.achievement_data).map(([key, value]) => (
+                        <div key={key} className="flex justify-between text-sm">
+                          <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
+                          <span className="font-semibold text-gray-900">{value}</span>
                         </div>
-                      </div>
+                      ))}
                     </div>
-
-                    <p className="text-xs text-gray-500">
-                      {format(new Date(activity.created_date), 'MMM d, h:mm a')}
-                    </p>
-                  </div>
+                  )}
                 </div>
 
-                {/* Cheer Reactions */}
-                <div className="flex items-center gap-2 mb-3 pb-3 border-b">
-                  {Object.entries(cheerEmojis).map(([type, emoji]) => (
-                    <button
-                      key={type}
-                      onClick={() => cheerMutation.mutate({
-                        activityId: activity.id,
-                        activityOwnerId: activity.created_by,
-                        reactionType: type
-                      })}
-                      className={`px-3 py-1.5 rounded-full text-lg transition-all ${myCheer?.reaction_type === type
-                        ? 'bg-purple-600 scale-110'
-                        : 'bg-gray-100 hover:bg-purple-100 hover:scale-110'
-                        }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                  <div className="ml-auto text-sm text-gray-600">
-                    {activity.cheer_count || 0} cheers
-                  </div>
+                {/* Reactions */}
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  {REACTION_TYPES.map(reaction => {
+                    const count = activityReactions.filter(r => r.reaction_type === reaction.type).length;
+                    const isActive = userReaction?.reaction_type === reaction.type;
+
+                    return (
+                      <button
+                        key={reaction.type}
+                        onClick={() => handleReaction(activity.id, reaction.type)}
+                        disabled={addReactionMutation.isPending}
+                        className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm transition-all ${isActive
+                          ? 'bg-purple-100 border-2 border-purple-500'
+                          : 'bg-gray-100 hover:bg-gray-200 border-2 border-transparent'
+                          }`}
+                        title={reaction.label}
+                      >
+                        <span className="text-lg">{reaction.emoji}</span>
+                        {count > 0 && <span className="font-semibold">{count}</span>}
+                      </button>
+                    );
+                  })}
                 </div>
 
-                {/* Comments */}
-                {activityComments.length > 0 && (
-                  <div className="space-y-2 mb-3">
-                    {activityComments.slice(0, 2).map((comment) => (
-                      <div key={comment.id} className="bg-gray-50 rounded-lg p-2">
-                        <p className="text-xs font-semibold text-gray-900">{comment.commenter_name}</p>
-                        <p className="text-sm text-gray-700">{comment.comment_text}</p>
-                      </div>
-                    ))}
-                    {activityComments.length > 2 && (
-                      <p className="text-xs text-gray-600">
-                        +{activityComments.length - 2} more comments
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Comment Input */}
-                {commentingOn === activity.id ? (
-                  <div className="space-y-2">
-                    <Textarea
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      placeholder="Write a supportive comment..."
-                      rows={2}
-                      className="resize-none"
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        onClick={() => commentMutation.mutate({ activityId: activity.id })}
-                        disabled={!commentText.trim() || commentMutation.isPending}
-                        size="sm"
-                        className="bg-purple-600"
-                      >
-                        Post Comment
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          setCommentingOn(null);
-                          setCommentText('');
-                        }}
-                        variant="outline"
-                        size="sm"
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <Button
-                    onClick={() => setCommentingOn(activity.id)}
-                    variant="ghost"
-                    size="sm"
-                    className="w-full text-gray-600"
+                {/* Action Buttons */}
+                <div className="flex items-center gap-4 pt-3 border-t">
+                  <button
+                    onClick={() => setSelectedActivity(selectedActivity === activity.id ? null : activity.id)}
+                    className="flex items-center gap-2 text-gray-600 hover:text-purple-600 transition-colors"
                   >
-                    <MessageCircle className="w-4 h-4 mr-2" />
-                    Add Comment
-                  </Button>
-                )}
+                    <MessageCircle className="w-4 h-4" />
+                    <span className="text-sm font-medium">
+                      {activity.comment_count || 0} {activity.comment_count === 1 ? 'Comment' : 'Comments'}
+                    </span>
+                  </button>
+
+                  <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 transition-colors">
+                    <Share2 className="w-4 h-4" />
+                    <span className="text-sm font-medium">Share</span>
+                  </button>
+                </div>
+
+                {/* Comments Section */}
+                <AnimatePresence>
+                  {selectedActivity === activity.id && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mt-4 pt-4 border-t space-y-3"
+                    >
+                      {/* Existing Comments */}
+                      {activityComments.map(comment => (
+                        <div key={comment.id} className="flex gap-3">
+                          {comment.commenter_avatar ? (
+                            <img
+                              src={comment.commenter_avatar}
+                              alt={comment.commenter_name}
+                              className="w-8 h-8 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white text-xs font-bold">
+                              {comment.commenter_name?.[0] || 'U'}
+                            </div>
+                          )}
+                          <div className="flex-1 bg-gray-50 rounded-lg p-3">
+                            <p className="font-semibold text-sm text-gray-900 mb-1">
+                              {comment.commenter_name}
+                            </p>
+                            <p className="text-sm text-gray-700">{comment.comment_text}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {format(new Date(comment.created_at), 'MMM d, h:mm a')}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Add Comment */}
+                      <div className="flex gap-3">
+                        <textarea
+                          value={commentText}
+                          onChange={(e) => setCommentText(e.target.value)}
+                          placeholder="Write a comment..."
+                          rows={2}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                        <Button
+                          onClick={() => handleComment(activity.id)}
+                          disabled={addCommentMutation.isPending || !commentText.trim()}
+                          className="bg-gradient-to-r from-purple-600 to-pink-600"
+                        >
+                          {addCommentMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Send className="w-4 h-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </CardContent>
             </Card>
           </motion.div>
         );
       })}
-
-      {activities.length === 0 && (
-        <Card className="bg-white/80 backdrop-blur-sm">
-          <CardContent className="p-12 text-center">
-            <Sparkles className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-gray-900 mb-2">
-              No Recent Activity
-            </h3>
-            <p className="text-gray-600">
-              Your friends' achievements will appear here!
-            </p>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
