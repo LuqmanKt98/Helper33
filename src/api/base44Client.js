@@ -3,7 +3,14 @@
 // Please migrate any remaining Base44 usages to the Supabase client in src/lib/supabaseClient.js.
 
 export const base44 = {
-    auth: {},
+    auth: {
+        me: async () => null,
+        logout: async () => { },
+        redirectToLogin: () => { window.location.href = '/login'; }
+    },
+    appLogs: {
+        logUserInApp: async (pageName) => { }
+    },
     entities: {
         Query: {}
     },
@@ -11,6 +18,6 @@ export const base44 = {
         Core: {}
     },
     functions: {
-        invoke: async () => ({ data: null })
+        invoke: async (functionName, payload) => ({ data: null })
     }
 };

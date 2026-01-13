@@ -89,6 +89,7 @@ import KnowledgeQuest from './pages/KnowledgeQuest';
 import LegalDisclaimer from './pages/LegalDisclaimer';
 import LifeCoach from './pages/LifeCoach';
 import LifeTemplates from './pages/LifeTemplates';
+import Login from './pages/Login';
 import Marketplace from './pages/Marketplace';
 import MarketplaceMessages from './pages/MarketplaceMessages';
 import MealPlanner from './pages/MealPlanner';
@@ -150,6 +151,7 @@ import SpiritualHub from './pages/SpiritualHub';
 import StoryDetail from './pages/StoryDetail';
 import StoryHub from './pages/StoryHub';
 import SubscriptionTracker from './pages/SubscriptionTracker';
+import SupabaseCallback from './pages/SupabaseCallback';
 import SupportUs from './pages/SupportUs';
 import TeaIsLife from './pages/TeaIsLife';
 import TermsOfService from './pages/TermsOfService';
@@ -173,8 +175,6 @@ import WomensHealthHub from './pages/WomensHealthHub';
 import WomensHealthNotifications from './pages/WomensHealthNotifications';
 import Workspace from './pages/Workspace';
 import Year2026Hub from './pages/Year2026Hub';
-import account from './pages/account';
-import profile from './pages/profile';
 import __Layout from './Layout.jsx';
 
 
@@ -270,6 +270,7 @@ export const PAGES = {
     "LegalDisclaimer": LegalDisclaimer,
     "LifeCoach": LifeCoach,
     "LifeTemplates": LifeTemplates,
+    "Login": Login,
     "Marketplace": Marketplace,
     "MarketplaceMessages": MarketplaceMessages,
     "MealPlanner": MealPlanner,
@@ -331,6 +332,7 @@ export const PAGES = {
     "StoryDetail": StoryDetail,
     "StoryHub": StoryHub,
     "SubscriptionTracker": SubscriptionTracker,
+    "SupabaseCallback": SupabaseCallback,
     "SupportUs": SupportUs,
     "TeaIsLife": TeaIsLife,
     "TermsOfService": TermsOfService,
@@ -354,8 +356,6 @@ export const PAGES = {
     "WomensHealthNotifications": WomensHealthNotifications,
     "Workspace": Workspace,
     "Year2026Hub": Year2026Hub,
-    "account": account,
-    "profile": profile,
 }
 
 export const pagesConfig = {

@@ -76,21 +76,43 @@ export const AuthProvider = ({ children }) => {
     });
   };
 
+  const loginWithGoogle = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/SupabaseCallback`,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+    } catch (error) {
+      console.error('Login failed:', error);
+      setAuthError({
+        type: 'auth_failed',
+        message: error.message || 'Failed to sign in with Google'
+      });
+    }
+  };
+
   const navigateToLogin = () => {
     // Redirect to a local login route; you can implement Supabase sign-in there
-    window.location.href = '/login';
+    window.location.href = '/Login';
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      isAuthenticated, 
+    <AuthContext.Provider value={{
+      user,
+      isAuthenticated,
       isLoadingAuth,
       isLoadingPublicSettings,
       authError,
       appPublicSettings,
       logout,
       navigateToLogin,
+      loginWithGoogle,
       checkAppState
     }}>
       {children}

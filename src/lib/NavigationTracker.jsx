@@ -23,23 +23,23 @@ export default function NavigationTracker() {
         // Extract page name from pathname
         const pathname = location.pathname;
         let pageName;
-        
+
         if (pathname === '/' || pathname === '') {
             pageName = mainPageKey;
         } else {
             // Remove leading slash and get the first segment
             const pathSegment = pathname.replace(/^\//, '').split('/')[0];
-            
+
             // Try case-insensitive lookup in Pages config
             const pageKeys = Object.keys(Pages);
             const matchedKey = pageKeys.find(
                 key => key.toLowerCase() === pathSegment.toLowerCase()
             );
-            
+
             pageName = matchedKey || null;
         }
 
-        if (isAuthenticated && pageName) {
+        if (isAuthenticated && pageName && base44?.appLogs?.logUserInApp) {
             base44.appLogs.logUserInApp(pageName).catch(() => {
                 // Silently fail - logging shouldn't break the app
             });

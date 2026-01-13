@@ -188,7 +188,7 @@ export default function Layout({ children, currentPageName }) {
     const handleOpenAIEvent = (e) => {
       handleOpenAI(e.detail?.message || "", e.detail?.agent || 'personal_assistant');
     };
-    
+
     window.addEventListener('openAIAssistant', handleOpenAIEvent);
     return () => window.removeEventListener('openAIAssistant', handleOpenAIEvent);
   }, [handleOpenAI]);
@@ -262,7 +262,7 @@ export default function Layout({ children, currentPageName }) {
         </AnimatePresence>
 
         <TrialBanner />
-        
+
 
         <nav className="bg-white/90 backdrop-blur-md shadow-lg sticky top-0 z-40 border-b border-orange-200/50">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -290,11 +290,10 @@ export default function Layout({ children, currentPageName }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${
-                      currentPageName === "Home"
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${currentPageName === "Home"
                         ? 'bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-md'
                         : 'text-gray-700 hover:bg-orange-50'
-                    }`}
+                      }`}
                   >
                     <Home className="w-4 h-4" />
                     <span className="font-medium">Home</span>
@@ -305,11 +304,10 @@ export default function Layout({ children, currentPageName }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${
-                      currentPageName === "Dashboard"
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${currentPageName === "Dashboard"
                         ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
                         : 'text-blue-700 hover:bg-blue-50'
-                    }`}
+                      }`}
                   >
                     <LayoutDashboard className="w-4 h-4" />
                     <span className="font-medium">Dashboard</span>
@@ -323,11 +321,10 @@ export default function Layout({ children, currentPageName }) {
                       e.stopPropagation();
                       setFeaturesDropdownOpen(!featuresDropdownOpen);
                     }}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all font-medium ${
-                      featuresDropdownOpen
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all font-medium ${featuresDropdownOpen
                         ? 'bg-purple-100 text-purple-900'
                         : 'text-gray-700 hover:bg-purple-50'
-                    }`}
+                      }`}
                   >
                     <Sparkles className="w-4 h-4 text-purple-600" />
                     <span>Features</span>
@@ -374,11 +371,10 @@ export default function Layout({ children, currentPageName }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${
-                      currentPageName === "CrisisHub"
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${currentPageName === "CrisisHub"
                         ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md'
                         : 'text-red-600 hover:bg-red-50 font-semibold'
-                    }`}
+                      }`}
                   >
                     <LifeBuoy className={`w-4 h-4 ${currentPageName !== "CrisisHub" ? 'animate-pulse' : ''}`} />
                     <span className="font-medium">Crisis</span>
@@ -389,11 +385,10 @@ export default function Layout({ children, currentPageName }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${
-                      currentPageName === "Shop"
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${currentPageName === "Shop"
                         ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                         : 'text-purple-700 hover:bg-purple-50'
-                    }`}
+                      }`}
                   >
                     <ShoppingBag className="w-4 h-4" />
                     <span className="font-medium">Shop</span>
@@ -404,11 +399,10 @@ export default function Layout({ children, currentPageName }) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${
-                      currentPageName === "About"
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all ${currentPageName === "About"
                         ? 'bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-md'
                         : 'text-gray-700 hover:bg-orange-50'
-                    }`}
+                      }`}
                   >
                     <Info className="w-4 h-4" />
                     <span className="font-medium">About</span>
@@ -603,11 +597,10 @@ export default function Layout({ children, currentPageName }) {
                     <Button
                       variant="ghost"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${
-                        currentPageName === "Home"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${currentPageName === "Home"
                           ? 'bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-md'
                           : 'text-gray-700 hover:bg-orange-50'
-                      }`}
+                        }`}
                     >
                       <Home className="w-4 h-4" />
                       <span className="font-medium">Home</span>
@@ -618,11 +611,10 @@ export default function Layout({ children, currentPageName }) {
                     <Button
                       variant="ghost"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${
-                        currentPageName === "Year2026Hub"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${currentPageName === "Year2026Hub"
                           ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
                           : 'text-purple-700 hover:bg-purple-50 font-semibold border-2 border-purple-300'
-                      }`}
+                        }`}
                     >
                       <Target className="w-4 h-4" />
                       <span className="font-medium">🎯 2026 Planner</span>
@@ -659,11 +651,10 @@ export default function Layout({ children, currentPageName }) {
                     <Button
                       variant="ghost"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${
-                        currentPageName === "CrisisHub"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${currentPageName === "CrisisHub"
                           ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white shadow-md'
                           : 'text-red-700 hover:bg-red-50 font-semibold border-2 border-red-300'
-                      }`}
+                        }`}
                     >
                       <LifeBuoy className={`w-4 h-4 ${currentPageName !== "CrisisHub" ? 'animate-pulse' : ''}`} />
                       <span className="font-medium">Crisis-Safe Hub</span>
@@ -685,11 +676,10 @@ export default function Layout({ children, currentPageName }) {
                     <Button
                       variant="ghost"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${
-                        currentPageName === "OurStory"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${currentPageName === "OurStory"
                           ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                           : 'text-purple-700 hover:bg-purple-50 font-semibold border-2 border-purple-300'
-                      }`}
+                        }`}
                     >
                       <BookOpenText className="w-4 h-4" />
                       <span className="font-medium">Our Story</span>
@@ -711,11 +701,10 @@ export default function Layout({ children, currentPageName }) {
                     <Button
                       variant="ghost"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${
-                        currentPageName === "HeartfulHolidays"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${currentPageName === "HeartfulHolidays"
                           ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md'
                           : 'text-blue-700 hover:bg-blue-50 border-2 border-blue-300'
-                      }`}
+                        }`}
                     >
                       <Snowflake className="w-4 h-4" />
                       <span className="font-medium">Holiday Hub</span>
@@ -737,11 +726,10 @@ export default function Layout({ children, currentPageName }) {
                     <Button
                       variant="ghost"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${
-                        currentPageName === "ClientPortal"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${currentPageName === "ClientPortal"
                           ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                           : 'text-purple-700 hover:bg-purple-50 border-2 border-purple-300'
-                      }`}
+                        }`}
                     >
                       <Calendar className="w-4 h-4" />
                       <span className="font-medium">My Portal</span>
@@ -752,11 +740,10 @@ export default function Layout({ children, currentPageName }) {
                     <Button
                       variant="ghost"
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${
-                        currentPageName === "TherapyTools"
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg justify-start text-sm ${currentPageName === "TherapyTools"
                           ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md'
                           : 'text-purple-700 hover:bg-purple-50 border-2 border-purple-300'
-                      }`}
+                        }`}
                     >
                       <ClipboardList className="w-4 h-4" />
                       <span className="font-medium">Therapy Tools</span>
@@ -825,7 +812,7 @@ export default function Layout({ children, currentPageName }) {
                           <span className="font-medium">Account Manager</span>
                         </Button>
                       </Link>
-                      
+
                       <Link to={createPageUrl('Account')}>
                         <Button
                           variant="ghost"
@@ -858,7 +845,7 @@ export default function Layout({ children, currentPageName }) {
                           <span className="font-medium">Integrations</span>
                         </Button>
                       </Link>
-                      
+
                       {user?.role === 'admin' && (
                         <div className="mt-4 bg-amber-500/10 border-2 border-amber-300 rounded-lg p-2 mx-2">
                           <h4 className="font-bold text-amber-700 mb-2 flex items-center gap-2 px-1">
@@ -915,7 +902,7 @@ export default function Layout({ children, currentPageName }) {
                               </Link>
                             </li>
                             <li>
-                              <Link to={createPageUrl('Security')}> 
+                              <Link to={createPageUrl('Security')}>
                                 <Button
                                   variant="ghost"
                                   onClick={() => setMobileMenuOpen(false)}
@@ -1005,7 +992,7 @@ export default function Layout({ children, currentPageName }) {
                     { name: 'Community', path: 'Community' },
                     { name: 'Blog', path: 'Blog' }
                   ].map(link => (
-                    <li key={link.path}>
+                    <li key={link.name}>
                       <Link to={createPageUrl(link.path)} className="text-orange-200 hover:text-white transition-colors text-sm flex items-center gap-2 group">
                         <span className="w-1 h-1 rounded-full bg-orange-400 group-hover:bg-white transition-colors"></span>
                         {link.name}
@@ -1024,7 +1011,7 @@ export default function Layout({ children, currentPageName }) {
                     { name: 'Contact Us', path: 'About' },
                     { name: 'Feedback', path: 'FeedbackSurvey' }
                   ].map(link => (
-                    <li key={link.path}>
+                    <li key={link.name}>
                       <Link to={createPageUrl(link.path)} className="text-orange-200 hover:text-white transition-colors text-sm flex items-center gap-2 group">
                         <span className="w-1 h-1 rounded-full bg-orange-400 group-hover:bg-white transition-colors"></span>
                         {link.name}
@@ -1129,7 +1116,7 @@ export default function Layout({ children, currentPageName }) {
                   <strong>⚕️ Health and Wellness Product Disclaimer:</strong> Helper33 is a wellness and personal growth tool.
                   This product and its features are <strong>NOT</strong> a replacement for medication, medical treatment, psychological therapy, or a doctor's examination.
                   Helper33 does not diagnose, cure, treat, mitigate, or prevent any disease, condition, or illness.
-                  <br/><br/>
+                  <br /><br />
                   <strong>If you are experiencing a mental health crisis:</strong> Please call 988 (US Suicide & Crisis Lifeline),
                   your local emergency services, or contact a licensed healthcare professional immediately.
                 </p>
@@ -1140,8 +1127,8 @@ export default function Layout({ children, currentPageName }) {
 
         {user && (
           <>
-            <AIAssistant 
-              currentPageName={currentPageName} 
+            <AIAssistant
+              currentPageName={currentPageName}
               initialMessage={aiInitialMessage}
               initialAgent={aiAgent}
             />
