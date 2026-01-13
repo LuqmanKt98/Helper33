@@ -95,6 +95,44 @@ export default function SocialFeed() {
     };
   });
 
+  const queryClient = useQueryClient();
+  const [statusText, setStatusText] = useState('');
+
+  const statusMutation = useMutation({
+    /** @param {string} text */
+    mutationFn: async (text) => {
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('friend_activities')
+        .insert({
+          user_id: user.id,
+          user_name: user.full_name,
+          user_avatar: user.avatar_url,
+          activity_type: 'status_update',
+          achievement_title: 'posted a status update',
+          achievement_description: text,
+          created_at: new Date().toISOString(),
+          cheer_count: 0,
+          comment_count: 0
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      setStatusText('');
+      queryClient.invalidateQueries({ queryKey: ['activities'] });
+    }
+  });
+
+  const handlePostStatus = () => {
+    if (!statusText.trim()) return;
+    statusMutation.mutate(statusText);
+  };
+
   const { data: unreadConversations = [] } = useQuery({
     queryKey: ['unread-conversations', user?.id],
     queryFn: async () => {
@@ -243,6 +281,44 @@ export default function SocialFeed() {
           </TabsList>
 
           <TabsContent value="feed">
+            <Card className="mb-6 border-2 border-purple-200">
+              <CardContent className="p-4">
+                <div className="flex gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold flex-shrink-0">
+                    {user?.avatar_url ? (
+                      <img src={user.avatar_url} className="w-full h-full rounded-full object-cover" alt="" />
+                    ) : (
+                      user?.full_name?.charAt(0) || 'U'
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <textarea
+                      value={statusText}
+                      onChange={(e) => setStatusText(e.target.value)}
+                      placeholder="What's happening? Share an update with your friends..."
+                      className="w-full bg-transparent border-none focus:ring-0 text-gray-800 resize-none min-h-[60px]"
+                    />
+                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-100">
+                      <div className="text-xs text-gray-500">
+                        {statusText.length} characters
+                      </div>
+                      <button
+                        onClick={handlePostStatus}
+                        disabled={!statusText.trim() || statusMutation.isPending}
+                        className="px-4 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-full text-sm font-bold shadow-md hover:shadow-lg disabled:opacity-50 transition-all flex items-center gap-2"
+                      >
+                        {statusMutation.isPending ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <TrendingUp className="w-3 h-3" />
+                        )}
+                        Share Update
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
             <ActivityFeed friends={friends} />
           </TabsContent>
 

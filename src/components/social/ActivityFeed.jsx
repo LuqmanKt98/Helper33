@@ -17,7 +17,8 @@ import {
   ThumbsUp,
   Send,
   Loader2,
-  TrendingUp
+  TrendingUp,
+  MessagesSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
@@ -57,14 +58,15 @@ export default function ActivityFeed({ friends = [] }) {
   const { data: activities = [], isLoading } = useQuery({
     queryKey: ['friendActivities', friends],
     queryFn: async () => {
-      if (!friends || friends.length === 0) return [];
+      if (!user) return [];
 
       const friendIds = friends.map(f => f.id);
+      const allIds = [...friendIds, user.id];
 
       const { data, error } = await supabase
         .from('friend_activities')
         .select('*')
-        .in('user_id', friendIds)
+        .in('user_id', allIds)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -101,6 +103,7 @@ export default function ActivityFeed({ friends = [] }) {
 
   // Add reaction mutation
   const addReactionMutation = useMutation({
+    /** @param {{ activityId: string, reactionType: string }} params */
     mutationFn: async (params) => {
       const { activityId, reactionType } = params;
       const activity = activities.find(a => a.id === activityId);
@@ -138,6 +141,7 @@ export default function ActivityFeed({ friends = [] }) {
 
   // Add comment mutation
   const addCommentMutation = useMutation({
+    /** @param {{ activityId: string, comment: string }} params */
     mutationFn: async (params) => {
       const { activityId, comment } = params;
       const activity = activities.find(a => a.id === activityId);
@@ -204,6 +208,8 @@ export default function ActivityFeed({ friends = [] }) {
         return <Flame className="w-5 h-5 text-orange-600" />;
       case 'level_up':
         return <TrendingUp className="w-5 h-5 text-purple-600" />;
+      case 'status_update':
+        return <MessagesSquare className="w-5 h-5 text-indigo-600" />;
       default:
         return <Sparkles className="w-5 h-5 text-blue-600" />;
     }

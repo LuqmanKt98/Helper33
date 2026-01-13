@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS public.forum_categories (
 ALTER TABLE public.forum_categories ENABLE ROW LEVEL SECURITY;
 
 -- Anyone can view forum categories
+DROP POLICY IF EXISTS "Anyone can view forum categories" ON public.forum_categories;
 CREATE POLICY "Anyone can view forum categories" ON public.forum_categories 
     FOR SELECT USING (TRUE);
 
@@ -101,12 +102,15 @@ CREATE TABLE IF NOT EXISTS public.post_reactions (
 
 ALTER TABLE public.post_reactions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Anyone can view reactions" ON public.post_reactions;
 CREATE POLICY "Anyone can view reactions" ON public.post_reactions 
     FOR SELECT USING (TRUE);
 
+DROP POLICY IF EXISTS "Users can add reactions" ON public.post_reactions;
 CREATE POLICY "Users can add reactions" ON public.post_reactions 
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can remove their reactions" ON public.post_reactions;
 CREATE POLICY "Users can remove their reactions" ON public.post_reactions 
     FOR DELETE USING (auth.uid() = user_id);
 
@@ -122,9 +126,11 @@ CREATE TABLE IF NOT EXISTS public.post_shares (
 
 ALTER TABLE public.post_shares ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view shares" ON public.post_shares;
 CREATE POLICY "Users can view shares" ON public.post_shares 
     FOR SELECT USING (TRUE);
 
+DROP POLICY IF EXISTS "Users can share posts" ON public.post_shares;
 CREATE POLICY "Users can share posts" ON public.post_shares 
     FOR INSERT WITH CHECK (auth.uid() = user_id);
 
@@ -159,9 +165,11 @@ CREATE TABLE IF NOT EXISTS public.user_engagement (
 
 ALTER TABLE public.user_engagement ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view their engagement" ON public.user_engagement;
 CREATE POLICY "Users can view their engagement" ON public.user_engagement
     FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "System can track engagement" ON public.user_engagement;
 CREATE POLICY "System can track engagement" ON public.user_engagement
     FOR INSERT WITH CHECK (TRUE);
 
