@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,8 @@ import {
   Calendar,
   CheckCircle,
   Flame,
-  Sparkles
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SEO from '@/components/SEO';
@@ -22,77 +24,109 @@ import Breadcrumbs from '@/components/Breadcrumbs';
 
 export default function Challenges() {
   const queryClient = useQueryClient();
-  const [selectedChallenge, setSelectedChallenge] = useState(null);
+  const { user } = useAuth(); // Use AuthContext for user
 
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me()
-  });
-
-  const { data: challenges = [], isLoading } = useQuery({
+  const { data: challenges = [], isLoading: isLoadingChallenges } = useQuery({
     queryKey: ['groupChallenges'],
-    queryFn: () => base44.entities.GroupChallenge.list(),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('challenges')
+        .select('*');
+      if (error) throw error;
+      return data || [];
+    },
     initialData: []
   });
 
   const { data: myParticipations = [] } = useQuery({
-    queryKey: ['myParticipations'],
+    queryKey: ['myParticipations', user?.email],
     queryFn: async () => {
-      if (!user) return [];
-      return base44.entities.ChallengeParticipant.filter({
-        participant_email: user.email
-      });
+      if (!user?.email) return [];
+      const { data, error } = await supabase
+        .from('challenge_participants')
+        .select('*')
+        .eq('participant_email', user.email);
+
+      if (error) throw error;
+      return data || [];
     },
-    enabled: !!user,
+    enabled: !!user?.email,
     initialData: []
   });
 
   const joinChallengeMutation = useMutation({
     mutationFn: async (challengeId) => {
       const challenge = challenges.find(c => c.id === challengeId);
-      return base44.entities.ChallengeParticipant.create({
-        challenge_id: challengeId,
-        participant_email: user.email,
-        participant_name: user.full_name,
-        progress: 0,
-        status: 'active',
-        goal_value: challenge?.goal_value || 30
-      });
+      if (!challenge) throw new Error('Challenge not found');
+
+      const { data, error } = await supabase
+        .from('challenge_participants')
+        .insert({
+          challenge_id: challengeId,
+          participant_email: user.email,
+          participant_name: user.user_metadata?.full_name || user.email,
+          progress: 0,
+          status: 'active',
+          goal_value: challenge.goal_value || 30,
+          user_id: user.id // Best practice to link by ID as well if schema supports it
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['myParticipations']);
+      queryClient.invalidateQueries({ queryKey: ['myParticipations'] });
       toast.success('🎉 You joined the challenge!');
+    },
+    onError: (error) => {
+      console.error('Error joining challenge:', error);
+      toast.error('Failed to join challenge');
     }
   });
 
   const updateProgressMutation = useMutation({
-    mutationFn: async ({ participationId, newProgress }) => {
-      return base44.entities.ChallengeParticipant.update(participationId, {
-        progress: newProgress
-      });
+    mutationFn: async (variables) => {
+      const { participationId, newProgress } = variables;
+      const { data, error } = await supabase
+        .from('challenge_participants')
+        .update({ progress: newProgress })
+        .eq('id', participationId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['myParticipations']);
+      queryClient.invalidateQueries({ queryKey: ['myParticipations'] });
       toast.success('Progress updated! 🌟');
+    },
+    onError: (error) => {
+      console.error('Error updating progress:', error);
+      toast.error('Failed to update progress');
     }
   });
 
   const activeChallenges = challenges.filter(c => c.status === 'active');
+
+  // Merge participations with challenge data
   const myChallenges = myParticipations.map(p => {
     const challenge = challenges.find(c => c.id === p.challenge_id);
     return { ...p, challenge };
-  }).filter(item => item.challenge);
+  }).filter(item => item.challenge); // Only show if challenge still exists
 
-  if (isLoading) {
+  if (isLoadingChallenges) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center">
         <div className="text-center">
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-            className="text-6xl mb-4"
+            className="flex justify-center mb-4"
           >
-            🎯
+            <Loader2 className="h-12 w-12 text-purple-600" />
           </motion.div>
           <h2 className="text-2xl font-bold text-purple-800">Loading Challenges...</h2>
         </div>
@@ -110,12 +144,12 @@ export default function Challenges() {
 
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 py-8 px-4">
         <div className="max-w-7xl mx-auto">
-          
+
           {/* Navigation */}
           <div className="mb-6">
             <BackButton />
             <div className="mt-3">
-              <Breadcrumbs 
+              <Breadcrumbs
                 items={[
                   { label: 'Community', path: 'Community' },
                   { label: 'Challenges' }
@@ -184,9 +218,10 @@ export default function Challenges() {
                                 {item.progress || 0} / {item.goal_value}
                               </span>
                             </div>
-                            <Progress 
-                              value={(item.progress / item.goal_value) * 100} 
+                            <Progress
+                              value={(item.progress / item.goal_value) * 100}
                               className="h-3"
+                            // @ts-ignore
                             />
                           </div>
 
@@ -199,9 +234,11 @@ export default function Challenges() {
                               });
                             }}
                             className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-                            disabled={item.progress >= item.goal_value}
+                            disabled={item.progress >= item.goal_value || updateProgressMutation.isPending}
                           >
-                            {item.progress >= item.goal_value ? (
+                            {updateProgressMutation.isPending && updateProgressMutation.variables?.participationId === item.id ? (
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : item.progress >= item.goal_value ? (
                               <>
                                 <Trophy className="w-4 h-4 mr-2" />
                                 Completed!
@@ -255,7 +292,7 @@ export default function Challenges() {
                     >
                       <Card className="h-full bg-white/80 backdrop-blur-sm border-2 border-purple-200 hover:border-purple-300 shadow-lg hover:shadow-xl transition-all overflow-hidden group">
                         <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${challenge.color_theme || 'from-purple-500 to-blue-500'}`} />
-                        
+
                         <CardHeader>
                           <div className="flex items-start justify-between mb-2">
                             <div className="text-4xl">{challenge.icon || '🎯'}</div>
@@ -270,7 +307,7 @@ export default function Challenges() {
                           </CardTitle>
                           <CardDescription>{challenge.description}</CardDescription>
                         </CardHeader>
-                        
+
                         <CardContent>
                           <div className="space-y-4">
                             {/* Challenge Info */}
@@ -300,7 +337,11 @@ export default function Challenges() {
                                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
                                 disabled={joinChallengeMutation.isPending}
                               >
-                                <Sparkles className="w-4 h-4 mr-2" />
+                                {joinChallengeMutation.isPending && joinChallengeMutation.variables === challenge.id ? (
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Sparkles className="w-4 h-4 mr-2" />
+                                )}
                                 Join Challenge
                               </Button>
                             ) : (

@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +13,8 @@ import {
   Zap,
   Plus,
   X,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
@@ -50,7 +50,8 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [profile, setProfile] = useState(existingProfile || {
-    display_name: '',
+    // If we have an existing profile, use its values, otherwise defaults
+    display_name: existingProfile?.full_name || '',
     bio: '',
     interests: [],
     goal_categories: [],
@@ -72,29 +73,52 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      if (existingProfile?.id) {
-        return base44.entities.UserCommunityProfile.update(existingProfile.id, {
-          ...data,
-          profile_completed: true
-        });
-      }
-      return base44.entities.UserCommunityProfile.create({
-        ...data,
-        profile_completed: true
-      });
+      // Map frontend fields to DB columns
+      // Note: We are updating the 'profiles' table.
+      // Ensure specific columns exist in your Supabase schema.
+      // If not, consider adding them or using a JSONB column like 'community_settings'.
+
+      const updateData = {
+        full_name: data.display_name, // Mapping display_name to full_name
+        bio: data.bio,
+        interests: data.interests,
+        goal_categories: data.goal_categories,
+        support_preferences: data.support_preferences,
+        journey_stage: data.journey_stage,
+        activity_level: data.activity_level,
+        custom_tags: data.custom_tags,
+        buddy_preferences: data.buddy_preferences, // JSONB?
+        is_open_to_new_connections: data.is_open_to_new_connections,
+        matchmaking_enabled: data.matchmaking_enabled,
+        // profile_completed: true // Assuming this is logic, typically 'onboarding_completed' or check specific fields
+      };
+
+      const { error } = await supabase
+        .from('profiles')
+        .update(updateData)
+        .eq('id', existingProfile.id);
+
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['communityProfile']);
+      queryClient.invalidateQueries(['currentUser']);
       toast.success('Profile saved! 🎉');
       if (onComplete) onComplete();
+    },
+    onError: (error) => {
+      console.error('Save error:', error);
+      toast.error('Failed to save profile. Please try again.');
     }
   });
 
   const toggleArrayItem = (array, item) => {
-    if (array.includes(item)) {
-      return array.filter(i => i !== item);
+    // Safety check if array is undefined/null
+    const safeArray = Array.isArray(array) ? array : [];
+    if (safeArray.includes(item)) {
+      return safeArray.filter(i => i !== item);
     }
-    return [...array, item];
+    return [...safeArray, item];
   };
 
   const handleNext = () => {
@@ -110,11 +134,11 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
       toast.error('Please enter a display name');
       return;
     }
-    if (profile.interests.length === 0) {
+    if (profile.interests?.length === 0) {
       toast.error('Please select at least one interest');
       return;
     }
-    if (profile.goal_categories.length === 0) {
+    if (profile.goal_categories?.length === 0) {
       toast.error('Please select at least one goal category');
       return;
     }
@@ -126,7 +150,7 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
     if (customInterest.trim() && !profile.interests.includes(customInterest.trim())) {
       setProfile({
         ...profile,
-        interests: [...profile.interests, customInterest.trim()],
+        interests: [...(profile.interests || []), customInterest.trim()],
         custom_tags: [...(profile.custom_tags || []), customInterest.trim()]
       });
       setCustomInterest('');
@@ -197,11 +221,10 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                       <button
                         key={stage.value}
                         onClick={() => setProfile({ ...profile, journey_stage: stage.value })}
-                        className={`p-3 rounded-lg border-2 transition-all ${
-                          profile.journey_stage === stage.value
+                        className={`p-3 rounded-lg border-2 transition-all ${profile.journey_stage === stage.value
                             ? 'border-purple-500 bg-purple-50'
                             : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                          }`}
                       >
                         <p className="font-semibold text-sm">{stage.label}</p>
                       </button>
@@ -243,11 +266,10 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                         ...profile,
                         interests: toggleArrayItem(profile.interests, interest)
                       })}
-                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                        profile.interests.includes(interest)
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${(profile.interests || []).includes(interest)
                           ? 'bg-pink-600 text-white'
                           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
+                        }`}
                     >
                       {interest}
                     </button>
@@ -269,13 +291,13 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                   </div>
                 </div>
 
-                {profile.interests.length > 0 && (
+                {(profile.interests || []).length > 0 && (
                   <div className="p-3 bg-green-50 rounded-lg">
                     <p className="text-sm font-medium text-green-800 mb-2">
-                      Selected ({profile.interests.length}):
+                      Selected ({(profile.interests || []).length}):
                     </p>
                     <div className="flex flex-wrap gap-1">
-                      {profile.interests.map(interest => (
+                      {(profile.interests || []).map(interest => (
                         <Badge key={interest} className="bg-pink-100 text-pink-800">
                           {interest}
                           <button
@@ -333,11 +355,10 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                           ...profile,
                           goal_categories: toggleArrayItem(profile.goal_categories, goal.value)
                         })}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${
-                          profile.goal_categories.includes(goal.value)
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${(profile.goal_categories || []).includes(goal.value)
                             ? 'border-blue-500 bg-blue-50'
                             : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2">
                           <span className="text-2xl">{goal.icon}</span>
@@ -360,11 +381,10 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                           ...profile,
                           support_preferences: toggleArrayItem(profile.support_preferences, pref.value)
                         })}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${
-                          profile.support_preferences.includes(pref.value)
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${(profile.support_preferences || []).includes(pref.value)
                             ? 'border-purple-500 bg-purple-50'
                             : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2">
                           <span className="text-xl">{pref.icon}</span>
@@ -423,11 +443,10 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                             preferred_check_in_frequency: freq.value
                           }
                         })}
-                        className={`p-3 rounded-lg border-2 transition-all ${
-                          profile.buddy_preferences.preferred_check_in_frequency === freq.value
+                        className={`p-3 rounded-lg border-2 transition-all ${profile.buddy_preferences?.preferred_check_in_frequency === freq.value
                             ? 'border-amber-500 bg-amber-50'
                             : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                          }`}
                       >
                         <p className="font-semibold text-sm">{freq.label}</p>
                       </button>
@@ -455,11 +474,10 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                             communication_style: style.value
                           }
                         })}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${
-                          profile.buddy_preferences.communication_style === style.value
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${profile.buddy_preferences?.communication_style === style.value
                             ? 'border-purple-500 bg-purple-50'
                             : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                          }`}
                       >
                         <p className="font-semibold text-sm">{style.label}</p>
                         <p className="text-xs text-gray-600">{style.desc}</p>
@@ -509,7 +527,11 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                     disabled={saveMutation.isPending}
                     className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500"
                   >
-                    <CheckCircle className="w-4 h-4 mr-2" />
+                    {saveMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                    )}
                     {saveMutation.isPending ? 'Saving...' : 'Complete Setup'}
                   </Button>
                 </div>

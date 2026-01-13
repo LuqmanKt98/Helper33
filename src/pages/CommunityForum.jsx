@@ -190,28 +190,8 @@ export default function CommunityForum() {
 
   const displayCategories = categories;
 
-  // ADMIN ONLY ACCESS CHECK
-  if (user && user.role !== 'admin') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full">
-          <CardContent className="p-8 text-center">
-            <Lock className="w-16 h-16 text-purple-600 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Admin Feature</h2>
-            <p className="text-gray-600 mb-6">
-              Community forums are currently in development and only available to administrators.
-            </p>
-            <Button
-              onClick={() => window.location.href = createPageUrl('Home')}
-              className="w-full bg-gradient-to-r from-purple-600 to-pink-600"
-            >
-              Return to Home
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  // Admin check removed to open feature to all users
+
 
   const getIconComponent = (iconName) => {
     const icons = {
@@ -393,7 +373,7 @@ export default function CommunityForum() {
         </div>
 
         {/* Tabs for sorting */}
-        <Tabs value={sortBy} onValueChange={setSortBy} className="w-full">
+        <Tabs defaultValue="recent" value={sortBy} onValueChange={setSortBy} className="w-full">
           <TabsList className="grid w-full max-w-md grid-cols-2">
             <TabsTrigger value="recent">
               <Clock className="w-4 h-4 mr-2" />

@@ -1,7 +1,7 @@
-
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -17,7 +17,8 @@ import {
   Bookmark,
   Trophy,
   Sparkles,
-  Award
+  Award,
+  Loader2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
@@ -37,71 +38,115 @@ export default function Events() {
   const [shareData, setShareData] = useState(null);
 
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
-  const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me()
-  });
-
-  const { data: allEvents = [] } = useQuery({
+  const { data: allEvents = [], isLoading: eventsLoading } = useQuery({
     queryKey: ['community-events'],
-    queryFn: () => base44.entities.CommunityEvent.filter({
-      status: { $in: ['published', 'live'] }
-    }, '-event_date')
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('community_events')
+        .select('*')
+        .in('status', ['published', 'live'])
+        .order('event_date', { ascending: false }); // Assuming -event_date meant descending
+
+      if (error) {
+        console.error('Error fetching events:', error);
+        return [];
+      }
+      return data;
+    }
   });
 
   const { data: myRSVPs = [] } = useQuery({
-    queryKey: ['my-event-rsvps'],
-    queryFn: () => base44.entities.EventRSVP.filter({}),
+    queryKey: ['my-event-rsvps', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('event_rsvps')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      return data;
+    },
     enabled: !!user
   });
 
   const { data: savedEvents = [] } = useQuery({
-    queryKey: ['saved-events'],
-    queryFn: () => base44.entities.SavedEvent.filter({}),
+    queryKey: ['saved-events', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('saved_events')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      return data;
+    },
     enabled: !!user
   });
 
   const rsvpMutation = useMutation({
-    mutationFn: async ({ eventId, status }) => {
+    mutationFn: async (variables) => {
+      const { eventId, status } = variables;
       const existingRSVP = myRSVPs.find(r => r.event_id === eventId);
+      const event = allEvents.find(e => e.id === eventId);
+      const eventDate = new Date(event.event_date);
+      const daysUntilEvent = Math.floor((eventDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
 
       if (existingRSVP) {
         if (status === 'not_going') {
-          await base44.entities.EventRSVP.delete(existingRSVP.id);
+          await supabase
+            .from('event_rsvps')
+            .delete()
+            .eq('id', existingRSVP.id);
           return { action: 'deleted' };
         }
-        return base44.entities.EventRSVP.update(existingRSVP.id, {
-          rsvp_status: status
-        });
+
+        const { data, error } = await supabase
+          .from('event_rsvps')
+          .update({ rsvp_status: status })
+          .eq('id', existingRSVP.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        return data;
       }
 
-      const event = allEvents.find(e => e.id === eventId);
-      const eventDate = new Date(event.event_date);
-      const daysUntilEvent = Math.floor((eventDate - new Date()) / (1000 * 60 * 60 * 24));
-      
-      const rsvp = await base44.entities.EventRSVP.create({
-        event_id: eventId,
-        user_name: user.full_name,
-        user_avatar: user.avatar_url,
-        rsvp_status: status
-      });
+      // Create new RSVP
+      const { data: rsvp, error: rsvpError } = await supabase
+        .from('event_rsvps')
+        .insert({
+          event_id: eventId,
+          user_id: user.id,
+          user_name: user.user_metadata?.full_name || user.full_name || 'Anonymous',
+          user_avatar: user.user_metadata?.avatar_url || user.avatar_url,
+          rsvp_status: status
+        })
+        .select()
+        .single();
+
+      if (rsvpError) throw rsvpError;
 
       // Award points for RSVP
       if (status === 'going') {
         try {
-          const pointsResult = await base44.functions.invoke('awardPoints', {
-            activity_type: 'event_rsvp',
-            activity_data: {
-              event_id: eventId,
-              event_title: event.title,
-              days_until_event: daysUntilEvent
+          const { data: pointsResult, error: pointsError } = await supabase.functions.invoke('awardPoints', {
+            body: {
+              activity_type: 'event_rsvp',
+              activity_data: {
+                event_id: eventId,
+                event_title: event.title,
+                days_until_event: daysUntilEvent
+              }
             }
           });
 
-          if (pointsResult.data.success) {
-            setPointsNotification(pointsResult.data);
-            queryClient.invalidateQueries(['user']);
+          if (!pointsError && pointsResult?.success) {
+            setPointsNotification(pointsResult);
+            queryClient.invalidateQueries({ queryKey: ['user'] });
           }
         } catch (error) {
           console.error('Error awarding RSVP points:', error);
@@ -111,9 +156,9 @@ export default function Events() {
       return rsvp;
     },
     onSuccess: (data, variables) => {
-      queryClient.invalidateQueries(['my-event-rsvps']);
-      queryClient.invalidateQueries(['community-events']);
-      
+      queryClient.invalidateQueries({ queryKey: ['my-event-rsvps'] });
+      queryClient.invalidateQueries({ queryKey: ['community-events'] });
+
       if (data?.action === 'deleted' || variables.status === 'not_going') {
         toast.success('RSVP removed');
       } else if (variables.status === 'going') {
@@ -121,29 +166,47 @@ export default function Events() {
       } else {
         toast.success('Marked as maybe');
       }
+    },
+    onError: (error) => {
+      toast.error('Failed to update RSVP: ' + error.message);
     }
   });
 
   const saveEventMutation = useMutation({
     mutationFn: async (eventId) => {
+      // eventId is passed directly, not as object property
       const existingSave = savedEvents.find(s => s.event_id === eventId);
-      
+      const event = allEvents.find(e => e.id === eventId);
+
       if (existingSave) {
-        await base44.entities.SavedEvent.delete(existingSave.id);
+        await supabase
+          .from('saved_events')
+          .delete()
+          .eq('id', existingSave.id);
         return { action: 'removed' };
       }
 
-      const event = allEvents.find(e => e.id === eventId);
-      return base44.entities.SavedEvent.create({
-        event_id: eventId,
-        event_title: event.title,
-        event_date: event.event_date,
-        event_category: event.category
-      });
+      const { data, error } = await supabase
+        .from('saved_events')
+        .insert({
+          event_id: eventId,
+          user_id: user.id,
+          event_title: event.title,
+          event_date: event.event_date,
+          event_category: event.category
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries(['saved-events']);
+      queryClient.invalidateQueries({ queryKey: ['saved-events'] });
       toast.success(data.action === 'removed' ? 'Event removed from saved' : 'Event saved! 📌');
+    },
+    onError: () => {
+      toast.error('Failed to save event');
     }
   });
 
@@ -153,14 +216,22 @@ export default function Events() {
 
   const stats = user?.gamification_stats || {};
 
+  if (eventsLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+      </div>
+    );
+  }
+
   return (
     <>
-      <SEO 
+      <SEO
         title="Community Events - DobryLife | Wellness Workshops & Group Activities"
         description="Join live community events including guided meditations, wellness workshops, expert Q&As, and group challenges. Connect with others and grow together."
         keywords="wellness events, meditation workshops, mental health events, community activities, wellness webinars, group meditation, expert wellness talks"
       />
-      
+
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 p-4 sm:p-6">
         {/* Points Notification */}
         {pointsNotification && (
@@ -230,7 +301,7 @@ export default function Events() {
                       </Button>
                     </Link>
                   </div>
-                  
+
                   <div className="grid grid-cols-3 gap-4">
                     <div className="text-center p-4 bg-white/10 backdrop-blur-sm rounded-xl">
                       <div className="text-2xl mb-1">🎫</div>
@@ -293,7 +364,7 @@ export default function Events() {
           </motion.div>
 
           {/* Event Tabs */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs defaultValue="upcoming" value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="grid w-full grid-cols-4 mb-6">
               <TabsTrigger value="upcoming">
                 <Calendar className="w-4 h-4 mr-2" />
@@ -314,7 +385,7 @@ export default function Events() {
 
             <TabsContent value="upcoming">
               <RecommendedEvents />
-              
+
               <div className="mt-8 grid gap-6">
                 {upcomingEvents.map((event, idx) => {
                   const myRSVP = myRSVPs.find(r => r.event_id === event.id);
@@ -361,7 +432,7 @@ export default function Events() {
                                 {event.title}
                               </CardTitle>
                               <p className="text-gray-600 mb-3">{event.description}</p>
-                              
+
                               <div className="space-y-2 text-sm text-gray-700">
                                 <div className="flex items-center gap-2">
                                   <Calendar className="w-4 h-4 text-purple-600" />
@@ -419,14 +490,18 @@ export default function Events() {
                                 View Details
                               </Button>
                             </Link>
-                            
+
                             {!myRSVP ? (
                               <Button
                                 onClick={() => rsvpMutation.mutate({ eventId: event.id, status: 'going' })}
                                 disabled={rsvpMutation.isPending}
                                 className="flex-1 bg-purple-600"
                               >
-                                <CheckCircle className="w-4 h-4 mr-2" />
+                                {rsvpMutation.isPending && rsvpMutation.variables?.eventId === event.id ? (
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                ) : (
+                                  <CheckCircle className="w-4 h-4 mr-2" />
+                                )}
                                 RSVP - Going
                               </Button>
                             ) : (
@@ -436,6 +511,7 @@ export default function Events() {
                                   onClick={() => rsvpMutation.mutate({ eventId: event.id, status: 'going' })}
                                   className={`flex-1 ${isGoing ? 'bg-green-600' : ''}`}
                                   size="sm"
+                                  disabled={rsvpMutation.isPending}
                                 >
                                   Going
                                 </Button>
@@ -444,6 +520,7 @@ export default function Events() {
                                   onClick={() => rsvpMutation.mutate({ eventId: event.id, status: 'maybe' })}
                                   className={`flex-1 ${myRSVP.rsvp_status === 'maybe' ? 'bg-yellow-600' : ''}`}
                                   size="sm"
+                                  disabled={rsvpMutation.isPending}
                                 >
                                   Maybe
                                 </Button>
@@ -451,6 +528,7 @@ export default function Events() {
                                   variant="outline"
                                   onClick={() => rsvpMutation.mutate({ eventId: event.id, status: 'not_going' })}
                                   size="sm"
+                                  disabled={rsvpMutation.isPending}
                                 >
                                   Cancel
                                 </Button>

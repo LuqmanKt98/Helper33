@@ -1,22 +1,21 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ChevronLeft, ChevronRight, Clock, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { 
-  format, 
-  startOfMonth, 
-  endOfMonth, 
-  startOfWeek, 
-  endOfWeek, 
-  addDays, 
+import {
+  format,
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
+  addDays,
   addMonths,
   addWeeks,
-  isSameMonth, 
+  isSameMonth,
   isSameDay,
   isToday,
   isBefore,
@@ -34,14 +33,11 @@ const categoryColors = {
   mental_health: 'bg-indigo-100 text-indigo-700 border-indigo-300'
 };
 
-export default function EventCalendar({ events, onEventClick }) {
+export default function EventCalendar({ events, myRSVPs = [], onEventClick }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState('month'); // 'month' or 'week'
 
-  const { data: myRSVPs = [] } = useQuery({
-    queryKey: ['my-event-rsvps'],
-    queryFn: () => base44.entities.EventRSVP.filter({}),
-  });
+
 
   const myRSVPEventIds = new Set(myRSVPs.map(r => r.event_id));
 
@@ -123,17 +119,15 @@ export default function EventCalendar({ events, onEventClick }) {
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: (weekIdx * 7 + dayIdx) * 0.01 }}
-                    className={`min-h-24 p-2 rounded-lg border-2 transition-all ${
-                      isToday(day)
-                        ? 'bg-purple-100 border-purple-400 ring-2 ring-purple-200'
-                        : isCurrentMonth
+                    className={`min-h-24 p-2 rounded-lg border-2 transition-all ${isToday(day)
+                      ? 'bg-purple-100 border-purple-400 ring-2 ring-purple-200'
+                      : isCurrentMonth
                         ? 'bg-white border-gray-200 hover:border-purple-300 hover:shadow-md'
                         : 'bg-gray-50 border-gray-100'
-                    } ${isPast && !isToday(day) ? 'opacity-60' : ''}`}
+                      } ${isPast && !isToday(day) ? 'opacity-60' : ''}`}
                   >
-                    <div className={`text-sm font-semibold mb-1 ${
-                      isToday(day) ? 'text-purple-700' : isCurrentMonth ? 'text-gray-900' : 'text-gray-400'
-                    }`}>
+                    <div className={`text-sm font-semibold mb-1 ${isToday(day) ? 'text-purple-700' : isCurrentMonth ? 'text-gray-900' : 'text-gray-400'
+                      }`}>
                       {format(day, 'd')}
                     </div>
 
@@ -142,9 +136,8 @@ export default function EventCalendar({ events, onEventClick }) {
                         <button
                           key={event.id}
                           onClick={() => onEventClick(event)}
-                          className={`w-full text-left text-xs px-2 py-1 rounded border ${
-                            categoryColors[event.category] || 'bg-gray-100 text-gray-700 border-gray-300'
-                          } hover:scale-105 transition-transform truncate`}
+                          className={`w-full text-left text-xs px-2 py-1 rounded border ${categoryColors[event.category] || 'bg-gray-100 text-gray-700 border-gray-300'
+                            } hover:scale-105 transition-transform truncate`}
                         >
                           <div className="flex items-center gap-1">
                             {myRSVPEventIds.has(event.id) && (
@@ -175,7 +168,7 @@ export default function EventCalendar({ events, onEventClick }) {
   const renderWeekView = () => {
     const days = [];
     let day = weekStart;
-    
+
     while (day <= weekEnd) {
       days.push(day);
       day = addDays(day, 1);
@@ -194,16 +187,14 @@ export default function EventCalendar({ events, onEventClick }) {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: idx * 0.05 }}
             >
-              <Card className={`${
-                isToday(day) 
-                  ? 'bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-400' 
-                  : 'bg-white border-gray-200'
-              } ${isPast && !isToday(day) ? 'opacity-60' : ''}`}>
+              <Card className={`${isToday(day)
+                ? 'bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-400'
+                : 'bg-white border-gray-200'
+                } ${isPast && !isToday(day) ? 'opacity-60' : ''}`}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-full ${
-                      isToday(day) ? 'bg-purple-600' : 'bg-gray-200'
-                    } flex flex-col items-center justify-center`}>
+                    <div className={`w-12 h-12 rounded-full ${isToday(day) ? 'bg-purple-600' : 'bg-gray-200'
+                      } flex flex-col items-center justify-center`}>
                       <span className={`text-xs ${isToday(day) ? 'text-white' : 'text-gray-600'}`}>
                         {format(day, 'EEE')}
                       </span>
@@ -227,9 +218,8 @@ export default function EventCalendar({ events, onEventClick }) {
                         <button
                           key={event.id}
                           onClick={() => onEventClick(event)}
-                          className={`w-full text-left p-3 rounded-lg border-2 ${
-                            categoryColors[event.category] || 'bg-gray-100 text-gray-700 border-gray-300'
-                          } hover:scale-105 hover:shadow-md transition-all`}
+                          className={`w-full text-left p-3 rounded-lg border-2 ${categoryColors[event.category] || 'bg-gray-100 text-gray-700 border-gray-300'
+                            } hover:scale-105 hover:shadow-md transition-all`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="flex-1">
@@ -283,13 +273,13 @@ export default function EventCalendar({ events, onEventClick }) {
         </div>
 
         <h2 className="text-xl font-bold text-gray-900">
-          {viewMode === 'month' 
+          {viewMode === 'month'
             ? format(currentDate, 'MMMM yyyy')
             : `Week of ${format(weekStart, 'MMM d, yyyy')}`
           }
         </h2>
 
-        <Tabs value={viewMode} onValueChange={setViewMode}>
+        <Tabs defaultValue="week" value={viewMode} onValueChange={setViewMode} className="w-auto">
           <TabsList>
             <TabsTrigger value="week">Week</TabsTrigger>
             <TabsTrigger value="month">Month</TabsTrigger>

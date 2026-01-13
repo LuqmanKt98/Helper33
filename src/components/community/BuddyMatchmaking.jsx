@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +17,8 @@ import {
   Filter,
   Search,
   X,
-  Zap
+  Zap,
+  Loader2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -38,41 +38,54 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
   });
 
   const { data: userProfile } = useQuery({
-    queryKey: ['communityProfile', currentUser?.email],
+    queryKey: ['communityProfile', currentUser?.id],
     queryFn: async () => {
-      const profiles = await base44.entities.UserCommunityProfile.filter({
-        created_by: currentUser.email
-      });
-      return profiles[0];
+      // In new schema, community details are in profiles table directly
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', currentUser.id)
+        .single();
+
+      if (error) return null;
+      return data;
     },
     enabled: !!currentUser
   });
 
   const { data: allProfiles = [] } = useQuery({
     queryKey: ['allCommunityProfiles'],
-    queryFn: () => base44.entities.UserCommunityProfile.list('-last_active'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*');
+      // .order('last_active', { ascending: false }); // last_active might not exist on profiles yet
+
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!currentUser
   });
 
   const calculateCompatibility = (profile) => {
     if (!userProfile) return 50;
-    
+
     let score = 0;
     let maxScore = 0;
 
-    const sharedInterests = (userProfile.interests || []).filter(i => 
+    const sharedInterests = (userProfile.interests || []).filter(i =>
       (profile.interests || []).includes(i)
     );
     maxScore += 30;
     score += (sharedInterests.length / Math.max(userProfile.interests?.length || 1, 1)) * 30;
 
-    const sharedGoals = (userProfile.goal_categories || []).filter(g => 
+    const sharedGoals = (userProfile.goal_categories || []).filter(g =>
       (profile.goal_categories || []).includes(g)
     );
     maxScore += 25;
     score += (sharedGoals.length / Math.max(userProfile.goal_categories?.length || 1, 1)) * 25;
 
-    const sharedSupport = (userProfile.support_preferences || []).filter(s => 
+    const sharedSupport = (userProfile.support_preferences || []).filter(s =>
       (profile.support_preferences || []).includes(s)
     );
     maxScore += 20;
@@ -101,23 +114,37 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
 
   const potentialMatches = allProfiles
     .filter(profile => {
-      if (profile.created_by === currentUser?.email) return false;
-      if (existingBuddies.some(b => 
-        b.buddy_email === profile.created_by || b.requester_email === profile.created_by
-      )) return false;
+      // Don't show myself
+      if (profile.id === currentUser?.id) return false;
+
+      // Don't show existing buddies
+      // existingBuddies might be friend_requests
+      const isBuddy = existingBuddies.some(b =>
+        (b.requester_id === profile.id || b.receiver_id === profile.id) && b.status === 'accepted'
+      );
+      if (isBuddy) return false;
+
+      // Don't show pending requests? Maybe optional, but cleaner not to.
+      const isPending = existingBuddies.some(b =>
+        (b.requester_id === profile.id || b.receiver_id === profile.id) && b.status === 'pending'
+      );
+      if (isPending) return false;
+
+      // Privacy checks
       if (!profile.is_open_to_new_connections) return false;
       if (!profile.matchmaking_enabled) return false;
-      if (searchTerm && !profile.display_name?.toLowerCase().includes(searchTerm.toLowerCase())) {
+
+      if (searchTerm && !(profile.full_name || profile.display_name)?.toLowerCase().includes(searchTerm.toLowerCase())) {
         return false;
       }
       if (filters.goalCategories.length > 0) {
-        const hasMatch = filters.goalCategories.some(cat => 
+        const hasMatch = filters.goalCategories.some(cat =>
           (profile.goal_categories || []).includes(cat)
         );
         if (!hasMatch) return false;
       }
       if (filters.supportTypes.length > 0) {
-        const hasMatch = filters.supportTypes.some(type => 
+        const hasMatch = filters.supportTypes.some(type =>
           (profile.support_preferences || []).includes(type)
         );
         if (!hasMatch) return false;
@@ -136,14 +163,16 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
     })
     .map(profile => {
       const compatibilityScore = calculateCompatibility(profile);
-      const sharedInterests = (userProfile.interests || []).filter(i => 
+      const sharedInterests = (userProfile.interests || []).filter(i =>
         (profile.interests || []).includes(i)
       );
-      const sharedGoals = (userProfile.goal_categories || []).filter(g => 
+      const sharedGoals = (userProfile.goal_categories || []).filter(g =>
         (profile.goal_categories || []).includes(g)
       );
       return {
         ...profile,
+        // normalize display props
+        display_name: profile.full_name || profile.display_name,
         compatibilityScore,
         sharedInterests,
         sharedGoals
@@ -153,13 +182,42 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
     .slice(0, 20);
 
   const requestBuddyMutation = useMutation({
-    mutationFn: (data) => base44.entities.BuddyConnection.create(data),
+    mutationFn: async (data) => {
+      // Create friend request
+      const { error: reqError } = await supabase
+        .from('friend_requests')
+        .insert({
+          requester_id: currentUser.id,
+          receiver_id: data.receiver_id,
+          status: 'pending'
+        });
+
+      if (reqError) throw reqError;
+
+      // Create Notification with message
+      const { error: notifError } = await supabase
+        .from('notifications')
+        .insert({
+          user_id: data.receiver_id,
+          type: 'connection_request',
+          title: 'New Buddy Request',
+          content: `${currentUser.full_name} wants to be your buddy! Message: "${data.connection_message}"`,
+          is_read: false
+        });
+
+      if (notifError) throw notifError;
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries(['buddyConnections']);
+      queryClient.invalidateQueries(['communityProfile']); // Refresh to update lists if needed
+      queryClient.invalidateQueries(['myConnections']);
       setShowRequestModal(false);
       setSelectedMatch(null);
       setConnectionMessage('');
       toast.success('Buddy request sent! 🤝');
+    },
+    onError: (error) => {
+      console.error('Buddy request error', error);
+      toast.error('Failed to send request');
     }
   });
 
@@ -170,15 +228,8 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
     }
 
     requestBuddyMutation.mutate({
-      requester_email: currentUser.email,
-      requester_name: currentUser.full_name,
-      requester_avatar: currentUser.avatar_url,
-      buddy_email: selectedMatch.created_by,
-      buddy_name: selectedMatch.display_name,
-      buddy_avatar: selectedMatch.avatar_url,
-      connection_type: 'goal_accountability',
+      receiver_id: selectedMatch.id, // Supabase profile ID
       connection_message: connectionMessage,
-      status: 'pending',
       compatibility_score: selectedMatch.compatibilityScore
     });
   };
@@ -194,7 +245,7 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
     setSearchTerm('');
   };
 
-  const hasActiveFilters = 
+  const hasActiveFilters =
     filters.goalCategories.length > 0 ||
     filters.supportTypes.length > 0 ||
     filters.journeyStage !== 'all' ||
@@ -202,7 +253,7 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
     filters.checkInFrequency !== 'all' ||
     searchTerm !== '';
 
-  if (!userProfile || !userProfile.profile_completed) {
+  if (!userProfile) { // || !userProfile.profile_completed (check fields instead?)
     return (
       <Card className="bg-gradient-to-br from-purple-50 to-pink-50">
         <CardContent className="p-8 text-center">
@@ -211,6 +262,7 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
           <p className="text-gray-600 mb-4">
             Set up your community profile to get personalized buddy matches
           </p>
+          {/* Add a button/link to profile setup if needed, but usually handled by parent mode switching */}
         </CardContent>
       </Card>
     );
@@ -246,7 +298,7 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
             <div className="flex items-center gap-2 flex-wrap">
               <Filter className="w-4 h-4 text-gray-500" />
               <span className="text-sm font-medium text-gray-700">Filters:</span>
-              
+
               <select
                 value=""
                 onChange={(e) => {
@@ -347,7 +399,7 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
             <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-gray-900 mb-2">No Matches Found</h3>
             <p className="text-gray-600 mb-4">
-              {hasActiveFilters 
+              {hasActiveFilters
                 ? 'Try adjusting your filters or search terms'
                 : 'Check back later as more users join the community'
               }
@@ -392,20 +444,18 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="flex flex-col items-end">
-                      <div className={`text-2xl font-bold ${
-                        match.compatibilityScore >= 80 ? 'text-green-600' :
-                        match.compatibilityScore >= 60 ? 'text-blue-600' :
-                        match.compatibilityScore >= 40 ? 'text-amber-600' :
-                        'text-gray-600'
-                      }`}>
+                      <div className={`text-2xl font-bold ${match.compatibilityScore >= 80 ? 'text-green-600' :
+                          match.compatibilityScore >= 60 ? 'text-blue-600' :
+                            match.compatibilityScore >= 40 ? 'text-amber-600' :
+                              'text-gray-600'
+                        }`}>
                         {match.compatibilityScore}%
                       </div>
                       <div className="flex items-center gap-1">
-                        <Star className={`w-4 h-4 ${
-                          match.compatibilityScore >= 80 ? 'text-green-600' : 'text-gray-400'
-                        }`} />
+                        <Star className={`w-4 h-4 ${match.compatibilityScore >= 80 ? 'text-green-600' : 'text-gray-400'
+                          }`} />
                         <span className="text-xs text-gray-600">Match</span>
                       </div>
                     </div>
@@ -477,7 +527,7 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
                       <p className="text-xs font-medium text-green-800 flex items-center gap-1">
                         <Zap className="w-3 h-3" />
                         {match.compatibilityScore >= 80 ? 'Excellent' :
-                         match.compatibilityScore >= 70 ? 'Great' : 'Good'} match because:
+                          match.compatibilityScore >= 70 ? 'Great' : 'Good'} match because:
                       </p>
                       <ul className="text-xs text-green-700 mt-1 space-y-1">
                         {match.sharedInterests && match.sharedInterests.length > 0 && (
@@ -559,7 +609,7 @@ export default function BuddyMatchmaking({ currentUser, existingBuddies = [] }) 
                   <p className="text-xs font-medium text-blue-800 mb-1">💡 Suggestion:</p>
                   <p className="text-xs text-blue-700">
                     "I noticed we're both working on {selectedMatch.sharedGoals[0]?.replace(/_/g, ' ') || 'similar goals'}
-                    {userProfile.interests && userProfile.interests.length > 0 && ` and share an interest in ${userProfile.interests[0]}`}. 
+                    {userProfile.interests && userProfile.interests.length > 0 && ` and share an interest in ${userProfile.interests[0]}`}.
                     I'd love to support each other on this journey!"
                   </p>
                   <Button

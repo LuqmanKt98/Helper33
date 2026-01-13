@@ -1,23 +1,23 @@
 import { useEffect } from 'react';
 
-export default function SEO({ 
+export default function SEO({
   title = "Helper33 - Family AI for Health, Learning, Cooking, Kids & Home | All-in-One AI Multitool",
   description = "Complete family AI ecosystem: Wellness AI for mental health & grief support, Student AI for homework help, Cooking AI for meal planning, Kids AI for safe learning games, Business AI for productivity. All-in-one AI health platform. 33+ AI tools, 13+ AI agents. Therapeutic, family-friendly multitool AI.",
   keywords = "family AI, all-in-one AI, AI health, AI for kids, multitool AI, wellness AI, student AI, cooking AI, kids AI, business AI, AI for mental health, AI mental health assistant, AI wellness tool, AI emotional support, grief support AI, AI therapy companion, anxiety support AI, stress management AI, AI homework helper, AI tutor for kids, AI study coach, AI learning assistant, AI meal planner, AI recipe generator, AI cooking assistant, nutrition AI, family meal planning AI, safe AI for kids, kids learning games AI, educational AI games, family hub AI, home management AI, family organizer app, daily routine planner AI, AI productivity tools, AI self-care app, AI wellness app for families, digital grief companion, AI mood tracker, family wellness AI, burnout support AI, coping skills AI, emotional healing technology, AI mindfulness exercises, personalized learning AI, budget meal planner AI, AI for homeschool, kids creative AI, child-safe AI tools, AI bedtime stories, therapeutic games for kids, business automation AI, workflow automation AI, AI content generator, AI email writer, AI social media manager",
-  ogTitle,
-  ogDescription,
+  ogTitle = null,
+  ogDescription = null,
   ogImage = "https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/68dc9a503fbc55d47a5b91dd/7020c5b33_logo-squarecc.png",
-  ogUrl,
+  ogUrl = null,
   twitterCard = "summary_large_image",
-  twitterTitle,
-  twitterDescription,
-  twitterImage,
-  canonicalUrl,
+  twitterTitle = null,
+  twitterDescription = null,
+  twitterImage = null,
+  canonicalUrl = null,
   author = "Helper33",
   robots = "index, follow",
   languageAlternates = {},
-  structuredData,
-  articleData,
+  structuredData = null,
+  articleData = null,
   pageType = "website"
 }) {
   useEffect(() => {
@@ -30,7 +30,7 @@ export default function SEO({
     // Helper function to update or create meta tags
     const updateMetaTag = (selector, attribute, content) => {
       if (!content) return;
-      
+
       let element = document.querySelector(selector);
       if (!element) {
         element = document.createElement('meta');
@@ -51,7 +51,7 @@ export default function SEO({
     updateMetaTag('meta[name="author"]', 'name', author);
     updateMetaTag('meta[name="robots"]', 'name', robots);
     updateMetaTag('meta[name="viewport"]', 'name', 'width=device-width, initial-scale=1.0');
-    
+
     // Theme color for mobile browsers
     updateMetaTag('meta[name="theme-color"]', 'name', '#9333ea');
     updateMetaTag('meta[name="msapplication-TileColor"]', 'name', '#9333ea');
@@ -85,7 +85,7 @@ export default function SEO({
     updateMetaTag('meta[name="distribution"]', 'name', 'Global');
     updateMetaTag('meta[name="rating"]', 'name', 'General');
     updateMetaTag('meta[name="target"]', 'name', 'all');
-    
+
     // Additional discovery tags with cluster focus
     updateMetaTag('meta[name="audience"]', 'name', 'families, parents, students, kids, caregivers, individuals seeking wellness, business professionals, entrepreneurs, homeschoolers');
     updateMetaTag('meta[name="classification"]', 'name', 'Family AI, Wellness AI, Student AI, Cooking AI, Kids AI, Business AI, Health Technology, Educational Technology, Family Management, AI Multitool');

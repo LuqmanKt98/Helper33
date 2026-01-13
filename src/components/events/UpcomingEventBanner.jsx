@@ -1,7 +1,8 @@
 
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { Card, CardContent } from '@/components/ui/card';
@@ -12,34 +13,42 @@ import { format, differenceInHours, differenceInMinutes } from 'date-fns';
 import { useTranslation } from '@/components/Translations';
 
 export default function UpcomingEventBanner() {
-  const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me()
-  });
-
+  const { user } = useAuth();
   const { t } = useTranslation(user);
 
   const { data: myUpcomingEvents = [] } = useQuery({
-    queryKey: ['my-upcoming-events'],
+    queryKey: ['my-upcoming-events', user?.id],
     queryFn: async () => {
       if (!user) return [];
 
-      const myRSVPs = await base44.entities.EventRSVP.filter({
-        rsvp_status: 'going'
-      });
+      try {
+        // Step 1: Get my RSVPs
+        const { data: myRSVPs } = await supabase
+          .from('event_rsvps')
+          .select('event_id')
+          .eq('user_id', user.id)
+          .eq('rsvp_status', 'going');
 
-      if (myRSVPs.length === 0) return [];
+        if (!myRSVPs || myRSVPs.length === 0) return [];
 
-      const eventIds = myRSVPs.map(r => r.event_id);
-      const events = await base44.entities.CommunityEvent.filter({
-        status: 'published'
-      });
+        const eventIds = myRSVPs.map(r => r.event_id);
+        const now = new Date().toISOString();
 
-      const now = new Date();
-      return events
-        .filter(e => eventIds.includes(e.id) && new Date(e.event_date) > now)
-        .sort((a, b) => new Date(a.event_date) - new Date(b.event_date))
-        .slice(0, 1);
+        // Step 2: Get the actual events that are upcoming
+        const { data: events } = await supabase
+          .from('community_events')
+          .select('*')
+          .in('id', eventIds)
+          .eq('status', 'published')
+          .gt('event_date', now)
+          .order('event_date', { ascending: true })
+          .limit(1);
+
+        return events || [];
+      } catch (error) {
+        console.error("Error fetching upcoming events:", error);
+        return [];
+      }
     },
     enabled: !!user
   });
@@ -59,11 +68,10 @@ export default function UpcomingEventBanner() {
       animate={{ opacity: 1, y: 0 }}
       className="mb-6"
     >
-      <Card className={`bg-gradient-to-r ${
-        isStartingSoon 
-          ? 'from-orange-500 to-red-500 animate-pulse' 
+      <Card className={`bg-gradient-to-r ${isStartingSoon
+          ? 'from-orange-500 to-red-500 animate-pulse'
           : 'from-purple-500 to-pink-500'
-      } text-white border-0 shadow-2xl`}>
+        } text-white border-0 shadow-2xl`}>
         <CardContent className="p-5">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
@@ -81,7 +89,7 @@ export default function UpcomingEventBanner() {
                 <div className="flex items-center gap-3 text-sm">
                   <span className="flex items-center gap-1">
                     <Clock className="w-3 h-3" />
-                    {isStartingSoon 
+                    {isStartingSoon
                       ? `${t('dashboard.startsIn')} ${minutesUntil} ${t('dashboard.minutes')}`
                       : `${t('dashboard.inHours')} ${hoursUntil} ${t('dashboard.hours')}`
                     }
@@ -94,7 +102,7 @@ export default function UpcomingEventBanner() {
               </div>
             </div>
             <Link to={createPageUrl(isStartingSoon ? 'EventLive' : 'EventDetail') + `?id=${nextEvent.id}`}>
-              <Button 
+              <Button
                 variant="secondary"
                 className="gap-2"
               >
