@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/lib/supabaseClient';
+import { useAuth } from '@/lib/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -25,10 +26,14 @@ function CommunityLeaderboard({ onNavigateToTab }) {
   const { data: topParticipants = [] } = useQuery({
     queryKey: ['topChallengeParticipants'],
     queryFn: async () => {
-      const participants = await base44.entities.ChallengeParticipant.filter({ status: 'active' });
-      return participants
-        .sort((a, b) => (b.completion_percentage || 0) - (a.completion_percentage || 0))
-        .slice(0, 20);
+      const { data, error } = await supabase
+        .from('challenge_participants')
+        .select('*')
+        .eq('status', 'active')
+        .order('completion_percentage', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return data || [];
     }
   });
 
@@ -54,21 +59,19 @@ function CommunityLeaderboard({ onNavigateToTab }) {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: idx * 0.05 }}
           >
-            <Card className={`${
-              idx === 0 ? 'bg-gradient-to-r from-yellow-100 to-orange-100 border-2 border-yellow-400' :
+            <Card className={`${idx === 0 ? 'bg-gradient-to-r from-yellow-100 to-orange-100 border-2 border-yellow-400' :
               idx === 1 ? 'bg-gradient-to-r from-gray-100 to-slate-100 border-2 border-gray-400' :
-              idx === 2 ? 'bg-gradient-to-r from-orange-100 to-amber-100 border-2 border-orange-400' :
-              'bg-white border border-gray-200'
-            }`}>
+                idx === 2 ? 'bg-gradient-to-r from-orange-100 to-amber-100 border-2 border-orange-400' :
+                  'bg-white border border-gray-200'
+              }`}>
               <CardContent className="p-4">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-3">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg ${
-                      idx === 0 ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-white' :
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg ${idx === 0 ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-white' :
                       idx === 1 ? 'bg-gradient-to-br from-gray-400 to-slate-500 text-white' :
-                      idx === 2 ? 'bg-gradient-to-br from-orange-400 to-amber-500 text-white' :
-                      'bg-gray-200 text-gray-700'
-                    }`}>
+                        idx === 2 ? 'bg-gradient-to-br from-orange-400 to-amber-500 text-white' :
+                          'bg-gray-200 text-gray-700'
+                      }`}>
                       {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
                     </div>
 
@@ -119,24 +122,59 @@ export default function CommunityHub() {
   const [activeTab, setActiveTab] = useState('feed');
   const [showShareModal, setShowShareModal] = useState(false);
 
+  const { user: authUser } = useAuth();
+
   const { data: user } = useQuery({
-    queryKey: ['user'],
-    queryFn: () => base44.auth.me()
+    queryKey: ['currentUser', authUser?.id],
+    queryFn: async () => {
+      if (!authUser) return null;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!authUser
   });
 
   const { data: challenges = [] } = useQuery({
     queryKey: ['activeChallenges'],
-    queryFn: () => base44.entities.GroupChallenge.filter({ status: 'active' })
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('challenges')
+        .select('*')
+        .in('status', ['active', 'upcoming']);
+      if (error) throw error;
+      return data || [];
+    }
   });
 
   const { data: circles = [] } = useQuery({
     queryKey: ['supportCircles'],
-    queryFn: () => base44.entities.SupportCircle.filter({ is_active: true })
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('support_circles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
   });
 
   const { data: myMemberships = [] } = useQuery({
-    queryKey: ['myCircleMemberships'],
-    queryFn: () => base44.entities.CircleMembership.filter({})
+    queryKey: ['myCircleMemberships', user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from('circle_memberships')
+        .select('*')
+        .eq('user_id', user.id);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user
   });
 
   return (
@@ -209,7 +247,7 @@ export default function CommunityHub() {
         </div>
 
         {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <Tabs defaultValue="feed" value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-4 bg-white/80 backdrop-blur-sm p-1 shadow-lg">
             <TabsTrigger value="feed" className="gap-2">
               <MessageCircle className="w-4 h-4" />
@@ -230,7 +268,7 @@ export default function CommunityHub() {
           </TabsList>
 
           <TabsContent value="feed">
-            <AnonymousProgressFeed />
+            <AnonymousProgressFeed onCreatePost={() => setShowShareModal(true)} />
           </TabsContent>
 
           <TabsContent value="challenges">
@@ -238,7 +276,7 @@ export default function CommunityHub() {
           </TabsContent>
 
           <TabsContent value="circles">
-            <SupportCircles circles={circles} myMemberships={myMemberships} />
+            <SupportCircles />
           </TabsContent>
 
           <TabsContent value="leaderboard">
