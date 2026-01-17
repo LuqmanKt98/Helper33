@@ -37,7 +37,8 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
         .from('profiles')
         .update({
           ...profileData,
-          has_community_profile: true
+          has_community_profile: true,
+          profile_completed: true
         })
         .eq('id', user.id)
         .select()
@@ -46,10 +47,15 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
       return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['communityProfiles']);
-      queryClient.invalidateQueries(['userProfile']);
+      queryClient.invalidateQueries({ queryKey: ['communityProfiles'] });
+      queryClient.invalidateQueries({ queryKey: ['userProfile'] });
+      queryClient.invalidateQueries({ queryKey: ['currentUser'] });
       toast.success('🎉 Community profile created! You can now connect with others!');
       onComplete?.();
+    },
+    onError: (error) => {
+      console.error('Profile creation error:', error);
+      toast.error('Failed to create profile. Please try again.');
     }
   });
 
@@ -139,8 +145,8 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setProfileData({ ...profileData, is_fully_anonymous: true, visibility_level: 'anonymous' })}
                   className={`p-6 rounded-xl border-2 transition-all ${profileData.is_fully_anonymous
-                      ? 'border-blue-500 bg-blue-50 shadow-lg'
-                      : 'border-gray-200 hover:border-blue-300'
+                    ? 'border-blue-500 bg-blue-50 shadow-lg'
+                    : 'border-gray-200 hover:border-blue-300'
                     }`}
                 >
                   <EyeOff className="w-12 h-12 text-blue-600 mx-auto mb-3" />
@@ -153,8 +159,8 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setProfileData({ ...profileData, is_fully_anonymous: false, visibility_level: 'semi_visible' })}
                   className={`p-6 rounded-xl border-2 transition-all ${!profileData.is_fully_anonymous
-                      ? 'border-purple-500 bg-purple-50 shadow-lg'
-                      : 'border-gray-200 hover:border-purple-300'
+                    ? 'border-purple-500 bg-purple-50 shadow-lg'
+                    : 'border-gray-200 hover:border-purple-300'
                     }`}
                 >
                   <Eye className="w-12 h-12 text-purple-600 mx-auto mb-3" />
@@ -172,8 +178,8 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                         key={emoji}
                         onClick={() => setProfileData({ ...profileData, display_emoji: emoji, display_name: `${emoji} Anonymous` })}
                         className={`p-3 text-2xl rounded-lg border-2 transition-all ${profileData.display_emoji === emoji
-                            ? 'border-purple-500 bg-purple-50 scale-110'
-                            : 'border-gray-200 hover:border-purple-300'
+                          ? 'border-purple-500 bg-purple-50 scale-110'
+                          : 'border-gray-200 hover:border-purple-300'
                           }`}
                       >
                         {emoji}
@@ -242,8 +248,8 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                       goal_categories: toggleArray(profileData.goal_categories, goal)
                     })}
                     className={`p-4 rounded-lg border-2 transition-all text-sm font-medium ${profileData.goal_categories.includes(goal)
-                        ? 'border-purple-500 bg-purple-50 text-purple-900'
-                        : 'border-gray-200 hover:border-purple-300 text-gray-700'
+                      ? 'border-purple-500 bg-purple-50 text-purple-900'
+                      : 'border-gray-200 hover:border-purple-300 text-gray-700'
                       }`}
                   >
                     {profileData.goal_categories.includes(goal) && (
@@ -280,8 +286,8 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
                       looking_for: toggleArray(profileData.looking_for, option)
                     })}
                     className={`p-4 rounded-lg border-2 transition-all text-sm font-medium ${profileData.looking_for.includes(option)
-                        ? 'border-purple-500 bg-purple-50 text-purple-900'
-                        : 'border-gray-200 hover:border-purple-300 text-gray-700'
+                      ? 'border-purple-500 bg-purple-50 text-purple-900'
+                      : 'border-gray-200 hover:border-purple-300 text-gray-700'
                       }`}
                   >
                     {profileData.looking_for.includes(option) && (

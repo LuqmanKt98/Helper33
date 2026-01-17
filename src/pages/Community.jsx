@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/lib/AuthContext';
@@ -69,13 +69,15 @@ export default function Community() {
       if (!user) return null;
       const { data, error } = await supabase
         .from('profiles')
-        .select('*, community_profile:id(*)')
+        .select('*')
         .eq('id', user.id)
         .single();
-      // Since community profile might be integrated into profiles or be a separate table
-      // Let's assume it's part of profiles or a related table. 
-      // Based on previous contexts, we have 'profiles' table.
-      return data;
+      if (error) {
+        console.error('Error fetching profile:', error);
+        return null;
+      }
+      // Return the profile only if community profile is set up
+      return data?.has_community_profile ? data : null;
     },
     enabled: !!user
   });
@@ -126,9 +128,11 @@ export default function Community() {
   };
 
   // Show profile setup if user doesn't have a community profile
-  if (user && !profileLoading && !userProfile && !showProfileSetup) {
-    setShowProfileSetup(true);
-  }
+  useEffect(() => {
+    if (user && !profileLoading && !userProfile && !showProfileSetup) {
+      setShowProfileSetup(true);
+    }
+  }, [user, profileLoading, userProfile, showProfileSetup]);
 
   return (
     <>
