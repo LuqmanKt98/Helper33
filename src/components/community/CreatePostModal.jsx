@@ -82,12 +82,17 @@ export default function CreatePostModal({ user, onClose }) {
         throw new Error('Content blocked by moderation');
       }
 
+      if (!user?.id) {
+        throw new Error('You must be logged in to create a post');
+      }
+
       const privacy = user?.community_privacy || { is_fully_anonymous: true };
 
       const { data, error } = await supabase
         .from('posts')
         .insert({
           ...postData,
+          user_id: user.id,
           author_id: user.id,
           author_name: privacy.is_fully_anonymous
             ? `${user?.profile_emoji || '🎭'} Anonymous`

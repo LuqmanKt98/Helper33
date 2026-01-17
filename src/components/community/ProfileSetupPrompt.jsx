@@ -33,6 +33,9 @@ export default function ProfileSetupPrompt({ user, onComplete }) {
 
   const createProfileMutation = useMutation({
     mutationFn: async () => {
+      if (!user?.id) {
+        throw new Error('You must be logged in to create a profile');
+      }
       const { data, error } = await supabase
         .from('profiles')
         .update({

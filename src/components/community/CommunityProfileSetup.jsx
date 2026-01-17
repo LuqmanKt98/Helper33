@@ -73,6 +73,10 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      if (!existingProfile?.id) {
+        throw new Error('You must be logged in to save your profile');
+      }
+
       // Map frontend fields to DB columns
       // Note: We are updating the 'profiles' table.
       // Ensure specific columns exist in your Supabase schema.
@@ -80,6 +84,7 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
 
       const updateData = {
         full_name: data.display_name, // Mapping display_name to full_name
+        display_name: data.display_name,
         bio: data.bio,
         interests: data.interests,
         goal_categories: data.goal_categories,
@@ -87,10 +92,11 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
         journey_stage: data.journey_stage,
         activity_level: data.activity_level,
         custom_tags: data.custom_tags,
-        buddy_preferences: data.buddy_preferences, // JSONB?
+        buddy_preferences: data.buddy_preferences, // JSONB
         is_open_to_new_connections: data.is_open_to_new_connections,
         matchmaking_enabled: data.matchmaking_enabled,
-        // profile_completed: true // Assuming this is logic, typically 'onboarding_completed' or check specific fields
+        has_community_profile: true,
+        profile_completed: true
       };
 
       const { error } = await supabase
@@ -101,8 +107,9 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['communityProfile']);
-      queryClient.invalidateQueries(['currentUser']);
+      queryClient.invalidateQueries({ queryKey: ['communityProfile'] });
+      queryClient.invalidateQueries({ queryKey: ['currentUser'] });
+      queryClient.invalidateQueries({ queryKey: ['userProfile'] });
       toast.success('Profile saved! 🎉');
       if (onComplete) onComplete();
     },
@@ -222,8 +229,8 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                         key={stage.value}
                         onClick={() => setProfile({ ...profile, journey_stage: stage.value })}
                         className={`p-3 rounded-lg border-2 transition-all ${profile.journey_stage === stage.value
-                            ? 'border-purple-500 bg-purple-50'
-                            : 'border-gray-200 hover:border-gray-300'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-gray-300'
                           }`}
                       >
                         <p className="font-semibold text-sm">{stage.label}</p>
@@ -267,8 +274,8 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                         interests: toggleArrayItem(profile.interests, interest)
                       })}
                       className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${(profile.interests || []).includes(interest)
-                          ? 'bg-pink-600 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        ? 'bg-pink-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                         }`}
                     >
                       {interest}
@@ -356,8 +363,8 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                           goal_categories: toggleArrayItem(profile.goal_categories, goal.value)
                         })}
                         className={`p-3 rounded-lg border-2 text-left transition-all ${(profile.goal_categories || []).includes(goal.value)
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:border-gray-300'
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300'
                           }`}
                       >
                         <div className="flex items-center gap-2">
@@ -382,8 +389,8 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                           support_preferences: toggleArrayItem(profile.support_preferences, pref.value)
                         })}
                         className={`p-3 rounded-lg border-2 text-left transition-all ${(profile.support_preferences || []).includes(pref.value)
-                            ? 'border-purple-500 bg-purple-50'
-                            : 'border-gray-200 hover:border-gray-300'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-gray-300'
                           }`}
                       >
                         <div className="flex items-center gap-2">
@@ -444,8 +451,8 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                           }
                         })}
                         className={`p-3 rounded-lg border-2 transition-all ${profile.buddy_preferences?.preferred_check_in_frequency === freq.value
-                            ? 'border-amber-500 bg-amber-50'
-                            : 'border-gray-200 hover:border-gray-300'
+                          ? 'border-amber-500 bg-amber-50'
+                          : 'border-gray-200 hover:border-gray-300'
                           }`}
                       >
                         <p className="font-semibold text-sm">{freq.label}</p>
@@ -475,8 +482,8 @@ export default function CommunityProfileSetup({ existingProfile, onComplete }) {
                           }
                         })}
                         className={`p-3 rounded-lg border-2 text-left transition-all ${profile.buddy_preferences?.communication_style === style.value
-                            ? 'border-purple-500 bg-purple-50'
-                            : 'border-gray-200 hover:border-gray-300'
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-gray-300'
                           }`}
                       >
                         <p className="font-semibold text-sm">{style.label}</p>
