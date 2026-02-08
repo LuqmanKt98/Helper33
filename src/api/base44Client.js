@@ -1,11 +1,14 @@
-// Base44 client has been removed in favor of Supabase.
-// This file is kept as a stub to avoid breaking any accidental imports.
-// Please migrate any remaining Base44 usages to the Supabase client in src/lib/supabaseClient.js.
+import { supabase } from '@/lib/supabaseClient';
 
 export const base44 = {
     auth: {
-        me: async () => null,
-        logout: async () => { },
+        me: async () => {
+            const { data } = await supabase.auth.getUser();
+            return data?.user || null;
+        },
+        logout: async () => {
+            await supabase.auth.signOut();
+        },
         redirectToLogin: () => { window.location.href = '/login'; }
     },
     appLogs: {
@@ -13,6 +16,13 @@ export const base44 = {
     },
     entities: {
         Query: {}
+    },
+    agents: {
+        getWhatsAppConnectURL: (agentId) => `https://wa.me/?text=${encodeURIComponent(`Connect with ${agentId} agent`)}`,
+        subscribeToConversation: (conversationId, callback) => {
+            // Return an unsubscribe function stub
+            return () => { };
+        }
     },
     integrations: {
         Core: {}

@@ -37,3 +37,4 @@ coverage/
 # Local tooling
 .vercel/
 .netlify/
+.vercel

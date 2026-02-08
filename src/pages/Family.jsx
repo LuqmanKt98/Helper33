@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useAuth } from "@/lib/AuthContext";
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from "@/components/ui/card";
 import {
   Users, Calendar, ListChecks, Globe, Shield, Target, ShieldCheck, HandHeart, PartyPopper, BookOpenText, Heart, CheckSquare

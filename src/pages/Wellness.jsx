@@ -260,6 +260,8 @@ const WellnessStats = ({ stats, todayProgress, waterGoal = 8 }) => {
 export default function Wellness() {
   const { user: authUser } = useAuth();
   const queryClient = useQueryClient();
+  const { trackActivity } = useActivityTracker();
+  const { playSound } = useNotifications();
 
   const today = new Date().toISOString().split('T')[0];
 
